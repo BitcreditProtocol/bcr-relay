@@ -35,20 +35,6 @@ cargo build --release
 ./target/release/bcr-relay
 ```
 
-## Configuration
-
-Configuration is handled via a `config.toml` file in the project root:
-
-```toml
-[server]
-host = "127.0.0.1"
-port = 8080
-
-[relay]
-name = "Bitcredit Relay"
-description = "A specialized Nostr relay for Bitcredit"
-```
-
 ## API Documentation
 
 The relay implements the standard Nostr protocol (NIPs) with Bitcredit-specific extensions:
