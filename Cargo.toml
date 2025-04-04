@@ -6,8 +6,10 @@ edition = "2024"
 [dependencies]
 nostr-sdk = { version = "0.40", features = ["nip59"] }
 nostr-relay-builder = { version = "0.40" }
+nostr-ndb = "0.40"
 tokio = "1.44.1"
-axum = { version = "0.8.3", features = ["ws"] }
+axum = { version = "0.8.3", features = ["ws", "tokio"] }
+axum-raw-websocket = { git = "https://github.com/tompro/axum-raw-websocket.git" }
 anyhow = "1.0.97"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
