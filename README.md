@@ -8,13 +8,6 @@ This project provides a customized Nostr relay that powers the Bitcredit applica
 
 ## Features
 
-- **High-performance Rust implementation**: Built for speed, reliability, and memory safety
-- **Bitcredit-specific event handling**: Custom event types and validation rules for credit-related operations
-- **Scalable architecture**: Designed to handle high throughput of Nostr events
-- **Authentication**: NIP-01, NIP-02, and custom authentication mechanisms
-- **Data persistence**: Configurable storage backends for relay events
-- **Filter optimization**: Enhanced query capabilities for Bitcredit-specific data
-
 ## Installation
 
 ### Prerequisites
@@ -25,7 +18,7 @@ This project provides a customized Nostr relay that powers the Bitcredit applica
 
 ```bash
 # Clone the repository
-git clone https://github.com/bitcredit/bcr-relay.git
+git clone https://github.com/BitcreditProtocol/bcr-relay.git
 cd bcr-relay
 
 # Build the project
