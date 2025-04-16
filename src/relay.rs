@@ -1,18 +1,19 @@
 use anyhow::Result;
-use nostr_ndb::NdbDatabase;
+use nostr_postgresdb::*;
 use nostr_relay_builder::{
     LocalRelay, RelayBuilder,
     builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
 };
 
+const DB_URL: &str = "postgres://postgres:password@localhost:5432";
+
 pub async fn init() -> Result<LocalRelay> {
-    Ok(LocalRelay::new(builder()?).await?)
+    Ok(LocalRelay::new(builder().await?).await?)
 }
 
-fn builder() -> Result<RelayBuilder> {
-    Ok(RelayBuilder::default()
-        .nip42(auth_mode())
-        .database(database()?))
+async fn builder() -> Result<RelayBuilder> {
+    let dba = database().await?;
+    Ok(RelayBuilder::default().nip42(auth_mode()).database(dba))
 }
 
 fn auth_mode() -> RelayBuilderNip42 {
@@ -22,6 +23,9 @@ fn auth_mode() -> RelayBuilderNip42 {
     }
 }
 
-fn database() -> Result<NdbDatabase> {
-    Ok(NdbDatabase::open("./data")?)
+async fn database() -> Result<NostrPostgres> {
+    nostr_postgresdb::run_migrations(DB_URL)?;
+    Ok(nostr_postgresdb::postgres_connection_pool(DB_URL)
+        .await?
+        .into())
 }

@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-nostr-sdk = { version = "0.40", features = ["nip59"] }
-nostr-relay-builder = { version = "0.40" }
-nostr-ndb = "0.40"
+nostr-sdk = { git = "https://github.com/BitcreditProtocol/nostr.git", features = [
+  "nip59",
+] }
+nostr-relay-builder = { git = "https://github.com/BitcreditProtocol/nostr.git", branch = "nostr-postgresdb" }
+nostr-postgresdb = { git = "https://github.com/BitcreditProtocol/nostr.git", branch = "nostr-postgresdb" }
 tokio = "1.44.1"
 axum = { version = "0.8.3", features = ["ws", "tokio"] }
 axum-raw-websocket = { git = "https://github.com/tompro/axum-raw-websocket.git" }
