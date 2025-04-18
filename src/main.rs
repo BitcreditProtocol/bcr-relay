@@ -12,17 +12,20 @@ use axum::{
     serve,
 };
 use axum_raw_websocket::RawSocketUpgrade;
+use clap::Parser;
 use nostr_relay_builder::LocalRelay;
+use relay::RelayConfig;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let listen_address = "0.0.0.0:8080";
     tracing_subscriber::fmt::init();
     info!("Starting relay...");
 
-    let app_state = AppState::new().await?;
+    let config = RelayConfig::parse();
+
+    let app_state = AppState::new(&config).await?;
     let app = Router::new()
         .route("/", any(websocket_handler))
         .fallback(handle_404)
@@ -32,15 +35,18 @@ async fn main() -> Result<()> {
             HeaderValue::from_static("*"),
         ));
 
-    info!("Listening on {}", listen_address);
-    if let Ok(listener) = tokio::net::TcpListener::bind(listen_address).await {
+    info!("Listening on {}", &config.listen_address);
+    if let Ok(listener) = tokio::net::TcpListener::bind(&config.listen_address).await {
         serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
         .await?;
     } else {
-        error!("Failed to bind to listen address {}", listen_address);
+        error!(
+            "Failed to bind to listen address {}",
+            &config.listen_address
+        );
     }
     Ok(())
 }
@@ -65,9 +71,9 @@ struct AppState {
 }
 
 impl AppState {
-    pub async fn new() -> Result<Self> {
+    pub async fn new(config: &RelayConfig) -> Result<Self> {
         Ok(Self {
-            relay: relay::init().await?,
+            relay: relay::init(config).await?,
         })
     }
 }
