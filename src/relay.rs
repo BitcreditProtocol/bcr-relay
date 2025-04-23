@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
-use nostr_postgresdb::*;
 use nostr_relay_builder::{
     LocalRelay, RelayBuilder,
     builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
 };
+use nostr_sqldb::*;
 
 pub async fn init(config: &RelayConfig) -> Result<LocalRelay> {
     Ok(LocalRelay::new(builder(config).await?).await?)
@@ -23,10 +23,8 @@ fn auth_mode() -> RelayBuilderNip42 {
 }
 
 async fn database(db_url: &str) -> Result<NostrPostgres> {
-    nostr_postgresdb::run_migrations(db_url)?;
-    Ok(nostr_postgresdb::postgres_connection_pool(db_url)
-        .await?
-        .into())
+    run_migrations(db_url)?;
+    Ok(NostrPostgres::new(db_url).await?)
 }
 
 #[derive(Debug, Clone, Parser)]
