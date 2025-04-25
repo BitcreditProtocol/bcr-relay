@@ -5,6 +5,7 @@ use nostr_relay_builder::{
     builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
 };
 use nostr_sqldb::*;
+use tracing::info;
 
 pub async fn init(config: &RelayConfig) -> Result<LocalRelay> {
     Ok(LocalRelay::new(builder(config).await?).await?)
@@ -23,7 +24,9 @@ fn auth_mode() -> RelayBuilderNip42 {
 }
 
 async fn database(db_url: &str) -> Result<NostrPostgres> {
+    info!("Starting database migrations on {}", db_url);
     run_migrations(db_url)?;
+    info!("Creating async database connection pool for {}", db_url);
     Ok(NostrPostgres::new(db_url).await?)
 }
 
