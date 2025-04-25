@@ -12,7 +12,7 @@ pub async fn init(config: &RelayConfig) -> Result<LocalRelay> {
 }
 
 async fn builder(config: &RelayConfig) -> Result<RelayBuilder> {
-    let dba = database(&config.db_connection_string).await?;
+    let dba = database(&config.db_connection_string()).await?;
     Ok(RelayBuilder::default().nip42(auth_mode()).database(dba))
 }
 
@@ -32,8 +32,29 @@ async fn database(db_url: &str) -> Result<NostrPostgres> {
 
 #[derive(Debug, Clone, Parser)]
 pub struct RelayConfig {
-    #[arg(default_value_t = String::from("postgres://postgres:password@localhost:5432"), long, env = "DB_CONNECTION_STRING")]
-    pub db_connection_string: String,
     #[arg(default_value_t = String::from("localhost:8080"), long, env = "LISTEN_ADDRESS")]
     pub listen_address: String,
+
+    #[arg(default_value_t = String::from("postgres"), long, env = "DB_USER")]
+    pub db_user: String,
+    #[arg(default_value_t = String::from("password"), long, env = "DB_PASSWORD")]
+    pub db_password: String,
+    #[arg(default_value_t = String::from(""), long, env = "DB_NAME")]
+    pub db_name: String,
+    #[arg(default_value_t = String::from("localhost"), long, env = "DB_HOST")]
+    pub db_host: String,
+}
+
+impl RelayConfig {
+    fn db_connection_string(&self) -> String {
+        let db_name = if self.db_name.is_empty() {
+            "".to_string()
+        } else {
+            format!("/{}", self.db_name)
+        };
+        format!(
+            "postgres://{}:{}@{}?host={}",
+            self.db_user, self.db_password, db_name, self.db_host
+        )
+    }
 }
