@@ -7,8 +7,8 @@ edition = "2024"
 nostr-sdk = { git = "https://github.com/BitcreditProtocol/nostr.git", features = [
   "nip59",
 ] }
-nostr-relay-builder = { git = "https://github.com/BitcreditProtocol/nostr.git", branch = "nostr-postgresdb" }
-nostr-sqldb = { git = "https://github.com/BitcreditProtocol/nostr.git", branch = "nostr-postgresdb", features = [
+nostr-relay-builder = { git = "https://github.com/BitcreditProtocol/nostr.git", branch = "sqldb" }
+nostr-sqldb = { git = "https://github.com/BitcreditProtocol/nostr.git", branch = "sqldb", features = [
   "postgres",
 ] }
 tokio = "1.44.1"
