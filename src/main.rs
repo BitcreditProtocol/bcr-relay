@@ -6,7 +6,7 @@ use std::{net::SocketAddr, sync::Arc};
 use anyhow::Result;
 use axum::{
     extract::{ConnectInfo, State},
-    http::{header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue, StatusCode, Uri},
+    http::{StatusCode, Uri},
     response::IntoResponse,
     routing::{any, delete, get, head, put},
     serve, Router,
@@ -17,13 +17,18 @@ use clap::Parser;
 use nostr::types::Url;
 use nostr_relay_builder::LocalRelay;
 use relay::RelayConfig;
-use tower_http::set_header::SetResponseHeaderLayer;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     info!("Starting relay...");
+
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
     let config = RelayConfig::parse();
 
@@ -41,10 +46,7 @@ async fn main() -> Result<()> {
         .route("/", any(websocket_handler))
         .fallback(handle_404)
         .with_state(app_state)
-        .layer(SetResponseHeaderLayer::if_not_present(
-            ACCESS_CONTROL_ALLOW_ORIGIN,
-            HeaderValue::from_static("*"),
-        ));
+        .layer(cors);
 
     info!("Listening on {}", &config.listen_address);
     if let Ok(listener) = tokio::net::TcpListener::bind(&config.listen_address).await {
