@@ -1,8 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
+use nostr::types::Url;
 use nostr_relay_builder::{
-    LocalRelay, RelayBuilder,
     builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
+    LocalRelay, RelayBuilder,
 };
 use nostr_sqldb::*;
 use tracing::info;
@@ -34,6 +35,8 @@ async fn database(db_url: &str) -> Result<NostrPostgres> {
 pub struct RelayConfig {
     #[arg(default_value_t = String::from("localhost:8080"), long, env = "LISTEN_ADDRESS")]
     pub listen_address: String,
+    #[arg(default_value_t = Url::parse("http://localhost:8080").unwrap(), long, env = "HOST_URL")]
+    pub host_url: Url,
 
     #[arg(default_value_t = String::from("postgres"), long, env = "DB_USER")]
     pub db_user: String,
@@ -46,7 +49,7 @@ pub struct RelayConfig {
 }
 
 impl RelayConfig {
-    fn db_connection_string(&self) -> String {
+    pub fn db_connection_string(&self) -> String {
         let db_name = if self.db_name.is_empty() {
             "".to_string()
         } else {
