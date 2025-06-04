@@ -22,6 +22,7 @@ use tracing::{error, info};
 use crate::AppState;
 
 const MAX_FILE_SIZE_BYTES: usize = 1_000_000; // ~1 MB
+const ENCRYPTION_PUB_KEY_BYTE_LEN: usize = 65; // we use uncompressed keys
 
 /// For now, the only parts of the API we implement are
 /// GET /<sha256> - get a file
@@ -63,6 +64,7 @@ pub async fn handle_upload(State(state): State<AppState>, body: Bytes) -> impl I
     let size = body.len();
 
     info!("Upload File called for {} bytes", size);
+    // check size
     if size > MAX_FILE_SIZE_BYTES {
         return (
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -74,7 +76,19 @@ pub async fn handle_upload(State(state): State<AppState>, body: Bytes) -> impl I
     if size == 0 {
         return (StatusCode::BAD_REQUEST, "Empty body").into_response();
     }
+    // validate it's an ECIES/secp256k1 encrypted blob by checking if it starts with an ephemeral secp256k1 pub key
+    // this is not a 100% guarantee (which is impossible), but rather a pretty reliable heuristic
+    if size < ENCRYPTION_PUB_KEY_BYTE_LEN {
+        error!("Non-encrypted Upload rejected - not big enough");
+        return (StatusCode::BAD_REQUEST, "Invalid body").into_response();
+    }
+    let pubkey_bytes = &body[0..ENCRYPTION_PUB_KEY_BYTE_LEN];
+    if let Err(e) = nostr::secp256k1::PublicKey::from_slice(pubkey_bytes) {
+        error!("Non-encrypted Upload rejected: {e}");
+        return (StatusCode::BAD_REQUEST, "Invalid body").into_response();
+    }
 
+    // create hash
     let mut hash_engine = sha256::HashEngine::default();
     if let Err(e) = hash_engine.write_all(&body) {
         error!("Error while hashing {size} bytes: {e}");
@@ -88,11 +102,13 @@ pub async fn handle_upload(State(state): State<AppState>, body: Bytes) -> impl I
         size: size as i32,
     };
 
+    // store
     if let Err(e) = state.file_store.insert(file).await {
         error!("Error while storing {size} bytes with hash {hash}: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_SERVER_ERROR").into_response();
     }
 
+    // return blob descriptor
     let blob_desc = BlobDescriptor::new(state.cfg.host_url, hash, size).unwrap();
     (StatusCode::OK, Json(blob_desc)).into_response()
 }
