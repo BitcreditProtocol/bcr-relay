@@ -1,5 +1,8 @@
 mod blossom;
+mod db;
+mod notification;
 mod relay;
+mod util;
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -8,7 +11,7 @@ use axum::{
     extract::{ConnectInfo, State},
     http::{StatusCode, Uri},
     response::IntoResponse,
-    routing::{any, delete, get, head, put},
+    routing::{any, delete, get, head, post, put},
     serve, Router,
 };
 use axum_raw_websocket::RawSocketUpgrade;
@@ -19,6 +22,14 @@ use nostr_relay_builder::LocalRelay;
 use relay::RelayConfig;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
+
+use crate::notification::{
+    email::{
+        mailjet::{MailjetConfig, MailjetService},
+        EmailService,
+    },
+    notification_store::NotificationStoreApi,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -43,6 +54,12 @@ async fn main() -> Result<()> {
         .route("/{hash}", get(blossom::handle_get_file))
         .route("/{hash}", head(blossom::handle_get_file_head))
         .route("/", delete(blossom::handle_delete))
+        .route("/notifications/v1/start", post(notification::start))
+        .route("/notifications/v1/register", post(notification::register))
+        .route(
+            "/notifications/confirm_email",
+            get(notification::confirm_email),
+        )
         .route("/", any(websocket_handler))
         .fallback(handle_404)
         .with_state(app_state)
@@ -80,6 +97,7 @@ async fn handle_404(uri: Uri) -> impl IntoResponse {
 #[derive(Clone)]
 struct AppConfig {
     pub host_url: Url,
+    pub email_from_address: String,
 }
 
 #[derive(Clone)]
@@ -87,19 +105,30 @@ struct AppState {
     pub relay: LocalRelay,
     pub cfg: AppConfig,
     pub file_store: Arc<dyn FileStoreApi>,
+    pub notification_store: Arc<dyn NotificationStoreApi>,
+    pub email_service: Arc<dyn EmailService>,
 }
 
 impl AppState {
     pub async fn new(config: &RelayConfig) -> Result<Self> {
-        let file_store =
-            blossom::file_store::PostgresFileStore::new(&config.db_connection_string()).await?;
-        file_store.init().await?;
+        let db = db::PostgresStore::new(&config.db_connection_string()).await?;
+        db.init().await?;
+        let store = Arc::new(db);
+
+        let email_service = MailjetService::new(&MailjetConfig {
+            api_key: config.email_api_key.clone(),
+            api_secret_key: config.email_api_secret_key.clone(),
+            url: config.email_url.clone(),
+        });
         Ok(Self {
             relay: relay::init(config).await?,
             cfg: AppConfig {
                 host_url: config.host_url.clone(),
+                email_from_address: config.email_from_address.clone(),
             },
-            file_store: Arc::new(file_store),
+            file_store: store.clone(),
+            notification_store: store,
+            email_service: Arc::new(email_service),
         })
     }
 }

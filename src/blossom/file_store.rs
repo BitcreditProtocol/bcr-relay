@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
+use crate::db::PostgresStore;
 use async_trait::async_trait;
-use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use nostr::hashes::sha256::Hash as Sha256Hash;
-use tokio_postgres::{NoTls, Row};
+use tokio_postgres::Row;
 
 use super::File;
 
@@ -13,40 +13,8 @@ pub trait FileStoreApi: Send + Sync {
     async fn insert(&self, file: File) -> Result<(), anyhow::Error>;
 }
 
-pub struct PostgresFileStore {
-    pool: Pool,
-}
-
-impl PostgresFileStore {
-    pub async fn new(conn_str: &str) -> Result<Self, anyhow::Error> {
-        let cfg: tokio_postgres::Config = conn_str.parse()?;
-        let mgr_config = ManagerConfig {
-            recycling_method: RecyclingMethod::Fast,
-        };
-        let pool = Pool::builder(Manager::from_config(cfg, NoTls, mgr_config))
-            .max_size(16)
-            .build()?;
-
-        Ok(Self { pool })
-    }
-
-    /// Creates the table, if it doesn't exist yet
-    pub async fn init(&self) -> Result<(), anyhow::Error> {
-        let qry = r#"
-            CREATE TABLE IF NOT EXISTS files (
-                hash CHAR(64) PRIMARY KEY,
-                data BYTEA NOT NULL,
-                size INTEGER NOT NULL
-            )
-        "#;
-
-        self.pool.get().await?.execute(qry, &[]).await?;
-        Ok(())
-    }
-}
-
 #[async_trait]
-impl FileStoreApi for PostgresFileStore {
+impl FileStoreApi for PostgresStore {
     async fn get(&self, hash: &Sha256Hash) -> Result<Option<File>, anyhow::Error> {
         let row = self
             .pool

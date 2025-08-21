@@ -21,9 +21,16 @@ tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 tower-http = { version = "0.6.6", features = ["cors"] }
 clap = { version = "4.5.39", features = ["derive", "env"] }
-chrono = "0.4.41"
+chrono = "0.4"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1"
-tokio-postgres = "0.7.13"
-deadpool-postgres = "0.14.1"
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+deadpool-postgres = "0.14"
+hex = { version = "0.4" }
+rand = { version = "0.8" }
+url = { version = "2.5" }
+email_address = "0.2"
+bitflags = "2.9"
+reqwest = { version = "0.12", default-features = false, features = ["default", "json"] }
+base64 = "0.22"
