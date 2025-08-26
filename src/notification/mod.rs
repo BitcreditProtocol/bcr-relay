@@ -56,13 +56,16 @@ bitflags! {
 /// A set of preference flags packed in an efficient way
 #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct PreferencesFlags: i64 {
-        const IssueBill = 0b0001;
+        const BillSigned = 1;
+        const BillAccepted = 1 << 1;
+        const BillAcceptanceRequested= 1 << 2;
+        // ...
     }
 }
 
 impl Default for PreferencesFlags {
     fn default() -> Self {
-        Self::IssueBill
+        Self::BillSigned | Self::BillAccepted | Self::BillAcceptanceRequested
     }
 }
 
@@ -74,6 +77,7 @@ pub struct NotificationStartReq {
 #[derive(Debug, Clone, Serialize)]
 pub struct NotificationStartResp {
     pub challenge: String,
+    pub ttl_seconds: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -153,7 +157,14 @@ pub async fn start(
         error!("Could not persist challenge for npub: {e}");
     }
 
-    (StatusCode::OK, Json(NotificationStartResp { challenge })).into_response()
+    (
+        StatusCode::OK,
+        Json(NotificationStartResp {
+            challenge,
+            ttl_seconds: CHALLENGE_EXPIRY_SECONDS,
+        }),
+    )
+        .into_response()
 }
 
 /// We validate npub, email and signed challenge. If everything is OK, we send a confirmation email
@@ -269,17 +280,26 @@ pub async fn register(
                     .into_response();
             }
 
-            // persist email confirmation state
+            let mut random_bytes_pref_token = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut random_bytes_pref_token);
+            let preferences_token = URL_SAFE.encode(random_bytes_pref_token);
+
+            // persist email confirmation state email notification preferences with token to change them
             if let Err(e) = state
                 .notification_store
-                .insert_confirmation_email_sent_for_npub(
+                .insert_confirmation_email_sent_and_preferences_for_npub(
                     &challenge.npub,
                     &payload.email,
                     &email_confirmation_token,
+                    &preferences_token,
+                    payload.ebill_url.as_str(),
+                    PreferencesFlags::default(),
                 )
                 .await
             {
-                error!("notification register persist email confirmation state: {e}");
+                error!(
+                    "notification register persist email confirmation and preferences state: {e}"
+                );
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResp::new("mail confirmation error")),
@@ -287,28 +307,6 @@ pub async fn register(
                     .into_response();
             }
 
-            // persist email notification preferences with token to change them
-            let mut random_bytes_pref_token = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut random_bytes_pref_token);
-            let preferences_token = URL_SAFE.encode(random_bytes_pref_token);
-            if let Err(e) = state
-                .notification_store
-                .insert_email_preferences_for_npub(
-                    &challenge.npub,
-                    &payload.email,
-                    &preferences_token,
-                    payload.ebill_url.as_str(),
-                    PreferencesFlags::default(),
-                )
-                .await
-            {
-                error!("notification register persist email preferences state: {e}");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResp::new("mail confirmation error")),
-                )
-                    .into_response();
-            }
             (StatusCode::OK, Json(SuccessResp::new("OK"))).into_response()
         }
         Ok(false) => {

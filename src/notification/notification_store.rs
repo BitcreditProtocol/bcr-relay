@@ -17,11 +17,14 @@ pub trait NotificationStoreApi: Send + Sync {
 
     async fn get_challenge_for_npub(&self, npub: &str) -> Result<Option<Challenge>, anyhow::Error>;
     async fn remove_challenge_for_npub(&self, npub: &str) -> Result<(), anyhow::Error>;
-    async fn insert_confirmation_email_sent_for_npub(
+    async fn insert_confirmation_email_sent_and_preferences_for_npub(
         &self,
         npub: &str,
         email: &str,
-        token: &str,
+        confirmation_token: &str,
+        preferences_token: &str,
+        ebill_url: &str,
+        flags: PreferencesFlags,
     ) -> Result<(), anyhow::Error>;
     async fn get_confirmation_email_state_for_token(
         &self,
@@ -35,14 +38,6 @@ pub trait NotificationStoreApi: Send + Sync {
         &self,
         npub: &str,
     ) -> Result<Option<EmailPreferences>, anyhow::Error>;
-    async fn insert_email_preferences_for_npub(
-        &self,
-        npub: &str,
-        email: &str,
-        token: &str,
-        ebill_url: &str,
-        flags: PreferencesFlags,
-    ) -> Result<(), anyhow::Error>;
     #[allow(unused)]
     async fn update_email_preferences_for_npub(
         &self,
@@ -97,20 +92,29 @@ impl NotificationStoreApi for PostgresStore {
         Ok(())
     }
 
-    async fn insert_confirmation_email_sent_for_npub(
+    async fn insert_confirmation_email_sent_and_preferences_for_npub(
         &self,
         npub: &str,
         email: &str,
-        token: &str,
+        confirmation_token: &str,
+        preferences_token: &str,
+        ebill_url: &str,
+        flags: PreferencesFlags,
     ) -> Result<(), anyhow::Error> {
-        self.pool
-            .get()
-            .await?
-            .execute(
+        let mut con = self.pool.get().await?;
+        let tx = con.transaction().await?;
+        tx.execute(
                 "INSERT INTO notif_email_verification (npub, email, token) VALUES ($1, $2, $3) ON CONFLICT (npub) DO UPDATE SET email = $2, token = $3, confirmed = false, sent_at = (NOW() AT TIME ZONE 'UTC')",
-                &[&npub, &email, &token],
+                &[&npub, &email, &confirmation_token],
             )
             .await?;
+
+        tx.execute(
+                "INSERT INTO notif_email_preferences (npub, email, token, ebill_url, flags) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (npub) DO UPDATE SET email = $2, token = $3, ebill_url = $4, flags = $5, enabled = false, email_confirmed = false",
+                &[&npub, &email, &preferences_token, &ebill_url, &{ flags.bits() }],
+            )
+            .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -139,23 +143,21 @@ impl NotificationStoreApi for PostgresStore {
         &self,
         npub: &str,
     ) -> Result<(), anyhow::Error> {
-        self.pool
-            .get()
-            .await?
-            .execute(
-                "DELETE FROM notif_email_verification WHERE npub = $1",
-                &[&npub],
-            )
+        let mut con = self.pool.get().await?;
+        let tx = con.transaction().await?;
+        tx.execute(
+            "DELETE FROM notif_email_verification WHERE npub = $1",
+            &[&npub],
+        )
+        .await?;
+
+        tx.execute(
+            "UPDATE notif_email_preferences SET email_confirmed = true, enabled = true WHERE npub = $1",
+            &[&npub],
+        )
             .await?;
 
-        self.pool
-            .get()
-            .await?
-            .execute(
-                "UPDATE notif_email_preferences SET email_confirmed = true, enabled = true WHERE npub = $1",
-                &[&npub],
-            )
-            .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -178,25 +180,6 @@ impl NotificationStoreApi for PostgresStore {
             Some(c) => EmailPreferences::try_from(c).map(Some),
             None => return Ok(None),
         }
-    }
-
-    async fn insert_email_preferences_for_npub(
-        &self,
-        npub: &str,
-        email: &str,
-        token: &str,
-        ebill_url: &str,
-        flags: PreferencesFlags,
-    ) -> Result<(), anyhow::Error> {
-        self.pool
-            .get()
-            .await?
-            .execute(
-                "INSERT INTO notif_email_preferences (npub, email, token, ebill_url, flags) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (npub) DO UPDATE SET email = $2, token = $3, ebill_url = $4, flags = $5, enabled = false, email_confirmed = false",
-                &[&npub, &email, &token, &ebill_url, &{ flags.bits() }],
-            )
-            .await?;
-        Ok(())
     }
 
     async fn update_email_preferences_for_npub(

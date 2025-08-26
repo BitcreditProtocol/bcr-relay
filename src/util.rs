@@ -39,7 +39,6 @@ pub mod tests {
         let challenge = hex::encode(random_bytes);
 
         let sig = signature(&challenge, &secret_key);
-        println!("sig: {sig}");
         let verified = verify_signature(&challenge, &sig, &x_only_pub);
         assert!(verified.is_ok());
         assert!(verified.as_ref().unwrap());

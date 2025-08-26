@@ -30,7 +30,7 @@ pub fn build_email_confirmation_message(
 
     // build template
     let body = format!(
-        "<html><head></head><body><a href=\"{link}\">Click here to confirm</a></body></html>"
+        "<html><head></head><body><a href=\"{link}\">Click here to confirm</a><br /><br />This link is valid for 1 day.</body></html>"
     );
 
     EmailMessage {
