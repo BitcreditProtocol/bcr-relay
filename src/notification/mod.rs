@@ -1,21 +1,28 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{Html, IntoResponse, Redirect},
     Json,
 };
-use base64::{engine::general_purpose::URL_SAFE, Engine as _};
+use axum_extra::extract::Form;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use bitflags::bitflags;
 use chrono::{DateTime, Duration, Utc};
 use nostr::nips::nip19::FromBech32;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use tinytemplate::TinyTemplate;
 use tracing::{error, warn};
 
-use crate::{notification::email::build_email_confirmation_message, util, AppState};
+use crate::{
+    notification::email::build_email_confirmation_message,
+    util::{self, get_logo_link},
+    AppState,
+};
 
 pub mod email;
 pub mod notification_store;
+mod template;
 
 /// Maximum age of a challenge - we expect requests to be made immediately after each other
 const CHALLENGE_EXPIRY_SECONDS: i64 = 120; // 2 minutes
@@ -54,18 +61,86 @@ pub struct EmailPreferences {
 
 bitflags! {
 /// A set of preference flags packed in an efficient way
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
     pub struct PreferencesFlags: i64 {
         const BillSigned = 1;
         const BillAccepted = 1 << 1;
-        const BillAcceptanceRequested= 1 << 2;
-        // ...
+        const BillAcceptanceRequested = 1 << 2;
+        const BillAcceptanceRejected = 1 << 3;
+        const BillAcceptanceTimeout = 1 << 4;
+        const BillAcceptanceRecourse = 1 << 5;
+        const BillPaymentRequested = 1 << 6;
+        const BillPaymentRejected = 1 << 7;
+        const BillPaymentTimeout = 1 << 8;
+        const BillPaymentRecourse = 1 << 9;
+        const BillRecourseRejected = 1 << 10;
+        const BillRecourseTimeout = 1 << 11;
+        const BillSellOffered = 1 << 12;
+        const BillBuyingRejected = 1 << 13;
+        const BillPaid = 1 << 14;
+        const BillRecoursePaid = 1 << 15;
+        const BillEndorsed = 1 << 16;
+        const BillSold = 1 << 17;
+        const BillMintingRequested = 1 << 18;
+        const BillNewQuote = 1 << 19;
+        const BillQuoteApproved = 1 << 20;
+    }
+}
+
+impl PreferencesFlags {
+    fn as_context_vec(self) -> Vec<PreferencesContextContentFlag> {
+        let all_flags = [
+            (Self::BillSigned, "Bill Signed"),
+            (Self::BillAccepted, "Bill Accepted"),
+            (Self::BillAcceptanceRequested, "Bill Acceptance Requested"),
+            (Self::BillAcceptanceRejected, "Bill Acceptance Rejected"),
+            (Self::BillAcceptanceTimeout, "Bill Acceptance Timeout"),
+            (Self::BillAcceptanceRecourse, "Bill Acceptance Recourse"),
+            (Self::BillPaymentRequested, "Bill Payment Requested"),
+            (Self::BillPaymentRejected, "Bill Payment Rejected"),
+            (Self::BillPaymentTimeout, "Bill Payment Timeout"),
+            (Self::BillPaymentRecourse, "Bill Payment Recourse"),
+            (Self::BillRecourseRejected, "Bill Recourse Rejected"),
+            (Self::BillRecourseTimeout, "Bill Recourse Timeout"),
+            (Self::BillSellOffered, "Bill Sell Offered"),
+            (Self::BillBuyingRejected, "Bill Buying Rejected"),
+            (Self::BillPaid, "Bill Paid"),
+            (Self::BillRecoursePaid, "Bill Recourse Paid"),
+            (Self::BillEndorsed, "Bill Endorsed"),
+            (Self::BillSold, "Bill Sold"),
+            (Self::BillMintingRequested, "Bill Minting Requested"),
+            (Self::BillNewQuote, "Bill New Quote"),
+            (Self::BillQuoteApproved, "Bill Quote Approved"),
+        ];
+
+        all_flags
+            .iter()
+            .map(|(flag, name)| PreferencesContextContentFlag {
+                checked: self.contains(*flag),
+                value: flag.bits(),
+                name: name.to_string(),
+            })
+            .collect()
     }
 }
 
 impl Default for PreferencesFlags {
     fn default() -> Self {
-        Self::BillSigned | Self::BillAccepted | Self::BillAcceptanceRequested
+        Self::BillSigned
+            | Self::BillAccepted
+            | Self::BillAcceptanceRequested
+            | Self::BillAcceptanceTimeout
+            | Self::BillAcceptanceRejected
+            | Self::BillAcceptanceRecourse
+            | Self::BillPaid
+            | Self::BillPaymentRequested
+            | Self::BillPaymentTimeout
+            | Self::BillPaymentRejected
+            | Self::BillPaymentRecourse
+            | Self::BillRecoursePaid
+            | Self::BillRecourseRejected
+            | Self::BillRecourseTimeout
+            | Self::BillMintingRequested
     }
 }
 
@@ -99,16 +174,8 @@ impl ErrorResp {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SuccessResp {
-    pub msg: String,
-}
-
-impl SuccessResp {
-    pub fn new(msg: &str) -> Self {
-        Self {
-            msg: msg.to_owned(),
-        }
-    }
+pub struct EmailRegisterResp {
+    pub preferences_token: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -117,6 +184,13 @@ pub struct NotificationRegisterReq {
     pub signed_challenge: String,
     pub ebill_url: url::Url,
     pub email: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChangePreferencesReq {
+    pub preferences_token: String,
+    pub enabled: Option<String>,
+    pub flags: Option<Vec<i64>>,
 }
 
 /// Send back a random challenge to the caller, which we expect to be signed with their npub to validate
@@ -263,13 +337,23 @@ pub async fn register(
             // send email confirmation mail
             let mut random_bytes = [0u8; 32];
             rand::thread_rng().fill_bytes(&mut random_bytes);
-            let email_confirmation_token = URL_SAFE.encode(random_bytes);
-            let email_msg = build_email_confirmation_message(
+            let email_confirmation_token = URL_SAFE_NO_PAD.encode(random_bytes);
+            let email_msg = match build_email_confirmation_message(
                 &state.cfg.host_url,
                 &state.cfg.email_from_address,
                 &payload.email,
                 &email_confirmation_token,
-            );
+            ) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    error!("notification register create confirmation mail error: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResp::new("send mail confirmation error")),
+                    )
+                        .into_response();
+                }
+            };
 
             if let Err(e) = state.email_service.send(email_msg).await {
                 error!("notification register send confirmation mail error: {e}");
@@ -282,7 +366,7 @@ pub async fn register(
 
             let mut random_bytes_pref_token = [0u8; 32];
             rand::thread_rng().fill_bytes(&mut random_bytes_pref_token);
-            let preferences_token = URL_SAFE.encode(random_bytes_pref_token);
+            let preferences_token = URL_SAFE_NO_PAD.encode(random_bytes_pref_token);
 
             // persist email confirmation state email notification preferences with token to change them
             if let Err(e) = state
@@ -307,7 +391,12 @@ pub async fn register(
                     .into_response();
             }
 
-            (StatusCode::OK, Json(SuccessResp::new("OK"))).into_response()
+            // return preferences token, so we can open email preferences from the app
+            (
+                StatusCode::OK,
+                Json(EmailRegisterResp { preferences_token }),
+            )
+                .into_response()
         }
         Ok(false) => {
             error!("notification register check invalid challenge error");
@@ -334,9 +423,14 @@ pub async fn confirm_email(
     qry: Query<EmailConfirmationToken>,
 ) -> impl IntoResponse {
     let token = qry.token.clone();
-    if let Err(e) = URL_SAFE.decode(&token) {
+    if let Err(e) = URL_SAFE_NO_PAD.decode(&token) {
         error!("notification email confirmation base64 error: {e}");
-        return (StatusCode::BAD_REQUEST, "invalid token").into_response();
+        return build_html_error(
+            StatusCode::BAD_REQUEST,
+            "invalid token",
+            &state.cfg.host_url,
+        )
+        .into_response();
     }
 
     let email_confirmation = match state
@@ -347,7 +441,12 @@ pub async fn confirm_email(
         Ok(Some(conf)) => conf,
         _ => {
             error!("notification email confirmation not found by token");
-            return (StatusCode::BAD_REQUEST, "invalid token").into_response();
+            return build_html_error(
+                StatusCode::BAD_REQUEST,
+                "invalid token",
+                &state.cfg.host_url,
+            )
+            .into_response();
         }
     };
 
@@ -355,13 +454,23 @@ pub async fn confirm_email(
     // token expired
     if now > (email_confirmation.sent_at + Duration::seconds(EMAIL_CONFIRMATION_EXPIRY_SECONDS)) {
         error!("notification confirm email token expired");
-        return (StatusCode::BAD_REQUEST, "token expired").into_response();
+        return build_html_error(
+            StatusCode::BAD_REQUEST,
+            "token expired",
+            &state.cfg.host_url,
+        )
+        .into_response();
     }
 
     // already confirmed
     if email_confirmation.confirmed {
         error!("notification confirm email already confirmed");
-        return (StatusCode::BAD_REQUEST, "email already confirmed").into_response();
+        return build_html_error(
+            StatusCode::BAD_REQUEST,
+            "email already confirmed",
+            &state.cfg.host_url,
+        )
+        .into_response();
     }
 
     // preferences exist for npub
@@ -373,14 +482,24 @@ pub async fn confirm_email(
         Ok(Some(pref)) => pref,
         _ => {
             error!("notification email confirmation no preferences found for npub");
-            return (StatusCode::BAD_REQUEST, "invalid token").into_response();
+            return build_html_error(
+                StatusCode::BAD_REQUEST,
+                "invalid token",
+                &state.cfg.host_url,
+            )
+            .into_response();
         }
     };
 
     // email doesn't match created preferences
     if email_confirmation.email != email_preferences.email {
         error!("notification email confirmation prefs don't match confirmation");
-        return (StatusCode::BAD_REQUEST, "invalid email").into_response();
+        return build_html_error(
+            StatusCode::BAD_REQUEST,
+            "invalid email",
+            &state.cfg.host_url,
+        )
+        .into_response();
     }
 
     // set to confirmed
@@ -390,8 +509,237 @@ pub async fn confirm_email(
         .await
     {
         error!("notification email confirmation, setting to confirmed failed: {e} ");
+        return build_html_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal server error",
+            &state.cfg.host_url,
+        )
+        .into_response();
+    }
+
+    build_html_success("Success! Email Confirmed", &state.cfg.host_url).into_response()
+}
+
+pub async fn preferences(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = URL_SAFE_NO_PAD.decode(&token) {
+        error!("notification preferences called with invalid token: {e}");
+        return build_html_error(
+            StatusCode::BAD_REQUEST,
+            "invalid token",
+            &state.cfg.host_url,
+        )
+        .into_response();
+    }
+
+    // check email preferences exist
+    let email_preferences = match state
+        .notification_store
+        .get_email_preferences_for_token(&token)
+        .await
+    {
+        Ok(Some(p)) => p,
+        _ => {
+            error!("notification update preferences invalid token");
+            return build_html_error(
+                StatusCode::BAD_REQUEST,
+                "invalid token",
+                &state.cfg.host_url,
+            )
+            .into_response();
+        }
+    };
+
+    // make sure email was confirmed
+    if !email_preferences.email_confirmed {
+        error!("notification preferences email was not confirmed");
+        return build_html_error(
+            StatusCode::BAD_REQUEST,
+            "email has to be confirmed",
+            &state.cfg.host_url,
+        )
+        .into_response();
+    }
+
+    build_template(
+        template::PREFERENCES_TEMPLATE,
+        PreferencesContext {
+            content: PreferencesContextContent {
+                enabled: email_preferences.enabled,
+                preferences_token: token,
+                anon_email: util::anonymize_email(&email_preferences.email),
+                anon_npub: util::anonymize_npub(&email_preferences.npub),
+                flags: email_preferences.flags.as_context_vec(),
+            },
+            title: "Email Preferences".to_owned(),
+            logo_link: get_logo_link(&state.cfg.host_url),
+        },
+        StatusCode::OK,
+    )
+    .into_response()
+}
+
+pub async fn update_preferences(
+    State(state): State<AppState>,
+    Form(payload): Form<ChangePreferencesReq>,
+) -> impl IntoResponse {
+    let token = payload.preferences_token;
+    if let Err(e) = URL_SAFE_NO_PAD.decode(&token) {
+        error!("notification preferences called with invalid token: {e}");
+        return build_html_error(
+            StatusCode::BAD_REQUEST,
+            "invalid token",
+            &state.cfg.host_url,
+        )
+        .into_response();
+    }
+
+    // check email preferences exist
+    let email_preferences = match state
+        .notification_store
+        .get_email_preferences_for_token(&token)
+        .await
+    {
+        Ok(Some(p)) => p,
+        _ => {
+            error!("notification update preferences invalid token");
+            return build_html_error(
+                StatusCode::BAD_REQUEST,
+                "invalid token",
+                &state.cfg.host_url,
+            )
+            .into_response();
+        }
+    };
+
+    // make sure email was confirmed
+    if !email_preferences.email_confirmed {
+        error!("notification preferences email was not confirmed");
+        return build_html_error(
+            StatusCode::BAD_REQUEST,
+            "email has to be confirmed",
+            &state.cfg.host_url,
+        )
+        .into_response();
+    }
+
+    let enabled = match payload.enabled {
+        Some(e) => e.as_str() == "on",
+        None => false,
+    };
+
+    let mut updated_flags = PreferencesFlags::empty();
+    // set all selected flags
+    if let Some(flags) = payload.flags {
+        for flag in flags {
+            if let Some(parsed) = PreferencesFlags::from_bits(flag) {
+                updated_flags |= parsed;
+            }
+        }
+    }
+
+    if let Err(e) = state
+        .notification_store
+        .update_email_preferences_for_token(&token, enabled, updated_flags)
+        .await
+    {
+        error!("notification update preferences error: {e}");
+        return build_html_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not save changes",
+            &state.cfg.host_url,
+        )
+        .into_response();
+    }
+
+    Redirect::to(&format!("/notifications/preferences/{}", token)).into_response()
+}
+
+#[derive(Debug, Serialize)]
+struct PreferencesContext {
+    pub content: PreferencesContextContent,
+    pub title: String,
+    pub logo_link: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PreferencesContextContent {
+    pub enabled: bool,
+    pub preferences_token: String,
+    pub anon_email: String,
+    pub anon_npub: String,
+    pub flags: Vec<PreferencesContextContentFlag>,
+}
+
+#[derive(Debug, Serialize)]
+struct PreferencesContextContentFlag {
+    pub checked: bool,
+    pub value: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorSuccessContext {
+    pub content: ErrorSuccessContextContent,
+    pub title: String,
+    pub logo_link: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ErrorSuccessContextContent {
+    pub msg: String,
+}
+
+fn build_html_success(msg: &str, host_url: &url::Url) -> impl IntoResponse {
+    build_template(
+        template::ERROR_SUCCESS_TEMPLATE,
+        ErrorSuccessContext {
+            content: ErrorSuccessContextContent {
+                msg: msg.to_owned(),
+            },
+            title: "Success".to_owned(),
+            logo_link: get_logo_link(host_url),
+        },
+        StatusCode::OK,
+    )
+}
+
+fn build_html_error(status: StatusCode, msg: &str, host_url: &url::Url) -> impl IntoResponse {
+    build_template(
+        template::ERROR_SUCCESS_TEMPLATE,
+        ErrorSuccessContext {
+            content: ErrorSuccessContextContent {
+                msg: msg.to_owned(),
+            },
+            title: "Error".to_owned(),
+            logo_link: get_logo_link(host_url),
+        },
+        status,
+    )
+}
+
+fn build_template<C>(content_tmpl: &str, ctx: C, status: StatusCode) -> impl IntoResponse
+where
+    C: Serialize,
+{
+    let mut tt = TinyTemplate::new();
+    if let Err(e) = tt.add_template("base", template::TEMPLATE) {
+        error!("error building base template: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+    }
+    if let Err(e) = tt.add_template("content", content_tmpl) {
+        error!("error building content template: {e}");
         return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
     }
 
-    (StatusCode::OK, "Success! Email Confirmed").into_response()
+    let rendered = match tt.render("base", &ctx) {
+        Ok(r) => r,
+        Err(e) => {
+            error!("error building template: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "internal server error").into_response();
+        }
+    };
+    (status, Html(rendered)).into_response()
 }
