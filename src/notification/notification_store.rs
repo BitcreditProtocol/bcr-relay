@@ -38,8 +38,11 @@ pub trait NotificationStoreApi: Send + Sync {
         &self,
         npub: &str,
     ) -> Result<Option<EmailPreferences>, anyhow::Error>;
-    #[allow(unused)]
-    async fn update_email_preferences_for_npub(
+    async fn get_email_preferences_for_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<EmailPreferences>, anyhow::Error>;
+    async fn update_email_preferences_for_token(
         &self,
         npub: &str,
         enabled: bool,
@@ -182,9 +185,30 @@ impl NotificationStoreApi for PostgresStore {
         }
     }
 
-    async fn update_email_preferences_for_npub(
+    async fn get_email_preferences_for_token(
         &self,
-        npub: &str,
+        token: &str,
+    ) -> Result<Option<EmailPreferences>, anyhow::Error> {
+        let row = self
+            .pool
+            .get()
+            .await?
+            .query_opt(
+                "SELECT npub, enabled, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE token = $1",
+                &[&token.to_string()],
+            )
+            .await?;
+        let db_email_preferences = row.map(|r| row_to_db_email_preferences(&r));
+
+        match db_email_preferences {
+            Some(c) => EmailPreferences::try_from(c).map(Some),
+            None => return Ok(None),
+        }
+    }
+
+    async fn update_email_preferences_for_token(
+        &self,
+        token: &str,
         enabled: bool,
         flags: PreferencesFlags,
     ) -> Result<(), anyhow::Error> {
@@ -192,8 +216,8 @@ impl NotificationStoreApi for PostgresStore {
             .get()
             .await?
             .execute(
-                "UPDATE notif_email_preferences SET enabled = $2, flags = $3 WHERE npub = $1",
-                &[&npub, &enabled, &{ flags.bits() }],
+                "UPDATE notif_email_preferences SET enabled = $2, flags = $3 WHERE token = $1",
+                &[&token, &enabled, &{ flags.bits() }],
             )
             .await?;
         Ok(())

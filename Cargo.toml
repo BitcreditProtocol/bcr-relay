@@ -15,11 +15,12 @@ nostr-sqldb = { git = "https://github.com/BitcreditProtocol/nostr.git", branch =
 ] }
 tokio = "1.45.1"
 axum = { version = "0.8.3", features = ["ws", "tokio"] }
+axum-extra = { version = "0.10", features = ["form"] }
 axum-raw-websocket = { git = "https://github.com/tompro/axum-raw-websocket.git" }
 anyhow = "1"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
-tower-http = { version = "0.6.6", features = ["cors"] }
+tower-http = { version = "0.6.6", features = ["cors", "fs"] }
 clap = { version = "4.5.39", features = ["derive", "env"] }
 chrono = "0.4"
 serde_json = "1"
@@ -34,3 +35,4 @@ email_address = "0.2"
 bitflags = "2.9"
 reqwest = { version = "0.12", default-features = false, features = ["default", "json"] }
 base64 = "0.22"
+tinytemplate = "1.2"

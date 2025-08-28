@@ -20,7 +20,10 @@ use clap::Parser;
 use nostr::types::Url;
 use nostr_relay_builder::LocalRelay;
 use relay::RelayConfig;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::ServeDir,
+};
 use tracing::{error, info};
 
 use crate::notification::{
@@ -45,6 +48,7 @@ async fn main() -> Result<()> {
 
     let app_state = AppState::new(&config).await?;
     let app = Router::new()
+        .nest_service("/static", ServeDir::new("./static"))
         .route("/list/{pub_key}", get(blossom::handle_list))
         .route("/mirror", put(blossom::handle_mirror))
         .route("/media", any(blossom::handle_media))
@@ -59,6 +63,14 @@ async fn main() -> Result<()> {
         .route(
             "/notifications/confirm_email",
             get(notification::confirm_email),
+        )
+        .route(
+            "/notifications/preferences/{token}",
+            get(notification::preferences),
+        )
+        .route(
+            "/notifications/update_preferences",
+            post(notification::update_preferences),
         )
         .route("/", any(websocket_handler))
         .fallback(handle_404)
