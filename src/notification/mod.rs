@@ -6,22 +6,25 @@ use axum::{
 };
 use axum_extra::extract::Form;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use bitflags::bitflags;
+use borsh_derive::BorshSerialize;
 use chrono::{DateTime, Duration, Utc};
-use nostr::nips::nip19::FromBech32;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tinytemplate::TinyTemplate;
 use tracing::{error, warn};
 
 use crate::{
-    notification::email::build_email_confirmation_message,
+    notification::{
+        email::{build_email_confirmation_message, build_email_notification_message},
+        preferences::{PreferencesContextContentFlag, PreferencesFlags},
+    },
     util::{self, get_logo_link},
     AppState,
 };
 
 pub mod email;
 pub mod notification_store;
+mod preferences;
 mod template;
 
 /// Maximum age of a challenge - we expect requests to be made immediately after each other
@@ -29,6 +32,8 @@ const CHALLENGE_EXPIRY_SECONDS: i64 = 120; // 2 minutes
 
 /// Maximum age of an email confirmation
 const EMAIL_CONFIRMATION_EXPIRY_SECONDS: i64 = 60 * 60 * 24; // 1 day
+
+const BITCR_PREFIX: &str = "bitcr";
 
 /// A challenge to validate the request comes from a given npub
 #[derive(Debug)]
@@ -53,95 +58,11 @@ pub struct EmailConfirmation {
 pub struct EmailPreferences {
     pub npub: String,
     pub enabled: bool,
+    pub token: String,
     pub email: String,
     pub email_confirmed: bool,
     pub ebill_url: url::Url,
     pub flags: PreferencesFlags,
-}
-
-bitflags! {
-/// A set of preference flags packed in an efficient way
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
-    pub struct PreferencesFlags: i64 {
-        const BillSigned = 1;
-        const BillAccepted = 1 << 1;
-        const BillAcceptanceRequested = 1 << 2;
-        const BillAcceptanceRejected = 1 << 3;
-        const BillAcceptanceTimeout = 1 << 4;
-        const BillAcceptanceRecourse = 1 << 5;
-        const BillPaymentRequested = 1 << 6;
-        const BillPaymentRejected = 1 << 7;
-        const BillPaymentTimeout = 1 << 8;
-        const BillPaymentRecourse = 1 << 9;
-        const BillRecourseRejected = 1 << 10;
-        const BillRecourseTimeout = 1 << 11;
-        const BillSellOffered = 1 << 12;
-        const BillBuyingRejected = 1 << 13;
-        const BillPaid = 1 << 14;
-        const BillRecoursePaid = 1 << 15;
-        const BillEndorsed = 1 << 16;
-        const BillSold = 1 << 17;
-        const BillMintingRequested = 1 << 18;
-        const BillNewQuote = 1 << 19;
-        const BillQuoteApproved = 1 << 20;
-    }
-}
-
-impl PreferencesFlags {
-    fn as_context_vec(self) -> Vec<PreferencesContextContentFlag> {
-        let all_flags = [
-            (Self::BillSigned, "Bill Signed"),
-            (Self::BillAccepted, "Bill Accepted"),
-            (Self::BillAcceptanceRequested, "Bill Acceptance Requested"),
-            (Self::BillAcceptanceRejected, "Bill Acceptance Rejected"),
-            (Self::BillAcceptanceTimeout, "Bill Acceptance Timeout"),
-            (Self::BillAcceptanceRecourse, "Bill Acceptance Recourse"),
-            (Self::BillPaymentRequested, "Bill Payment Requested"),
-            (Self::BillPaymentRejected, "Bill Payment Rejected"),
-            (Self::BillPaymentTimeout, "Bill Payment Timeout"),
-            (Self::BillPaymentRecourse, "Bill Payment Recourse"),
-            (Self::BillRecourseRejected, "Bill Recourse Rejected"),
-            (Self::BillRecourseTimeout, "Bill Recourse Timeout"),
-            (Self::BillSellOffered, "Bill Sell Offered"),
-            (Self::BillBuyingRejected, "Bill Buying Rejected"),
-            (Self::BillPaid, "Bill Paid"),
-            (Self::BillRecoursePaid, "Bill Recourse Paid"),
-            (Self::BillEndorsed, "Bill Endorsed"),
-            (Self::BillSold, "Bill Sold"),
-            (Self::BillMintingRequested, "Bill Minting Requested"),
-            (Self::BillNewQuote, "Bill New Quote"),
-            (Self::BillQuoteApproved, "Bill Quote Approved"),
-        ];
-
-        all_flags
-            .iter()
-            .map(|(flag, name)| PreferencesContextContentFlag {
-                checked: self.contains(*flag),
-                value: flag.bits(),
-                name: name.to_string(),
-            })
-            .collect()
-    }
-}
-
-impl Default for PreferencesFlags {
-    fn default() -> Self {
-        Self::BillSigned
-            | Self::BillAccepted
-            | Self::BillAcceptanceRequested
-            | Self::BillAcceptanceTimeout
-            | Self::BillAcceptanceRejected
-            | Self::BillAcceptanceRecourse
-            | Self::BillPaid
-            | Self::BillPaymentRequested
-            | Self::BillPaymentTimeout
-            | Self::BillPaymentRejected
-            | Self::BillPaymentRecourse
-            | Self::BillRecoursePaid
-            | Self::BillRecourseRejected
-            | Self::BillRecourseTimeout
-            | Self::BillMintingRequested
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -160,17 +81,30 @@ pub struct ErrorResp {
     pub msg: String,
 }
 
-#[derive(Deserialize)]
-pub struct EmailConfirmationToken {
-    pub token: String,
-}
-
 impl ErrorResp {
     pub fn new(msg: &str) -> Self {
         Self {
             msg: msg.to_owned(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SuccessResp {
+    pub msg: String,
+}
+
+impl SuccessResp {
+    pub fn new(msg: &str) -> Self {
+        Self {
+            msg: msg.to_owned(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct EmailConfirmationToken {
+    pub token: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,6 +121,26 @@ pub struct NotificationRegisterReq {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct NotificationSendReq {
+    /// The payload for the notification
+    pub payload: NotificationSendPayload,
+    /// The payload signed by the sender
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, Deserialize, BorshSerialize)]
+pub struct NotificationSendPayload {
+    /// The type of event, e.g. BillSigned
+    pub kind: String,
+    /// The domain ID, e.g. a bill id
+    pub id: String,
+    /// The receiver npub
+    pub receiver: String,
+    /// The sender npub
+    pub sender: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ChangePreferencesReq {
     pub preferences_token: String,
     pub enabled: Option<String>,
@@ -199,18 +153,7 @@ pub async fn start(
     State(state): State<AppState>,
     Json(payload): Json<NotificationStartReq>,
 ) -> impl IntoResponse {
-    let parsed_npub = match nostr::PublicKey::from_bech32(&payload.npub) {
-        Ok(npub) => npub,
-        Err(e) => {
-            error!("notification start with invalid npub: {e}");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResp::new("Invalid npub")),
-            )
-                .into_response();
-        }
-    };
-    if let Err(e) = parsed_npub.xonly() {
+    if let Err(e) = util::validate_npub(&payload.npub) {
         error!("notification start with invalid npub: {e}");
         return (
             StatusCode::BAD_REQUEST,
@@ -247,19 +190,8 @@ pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<NotificationRegisterReq>,
 ) -> impl IntoResponse {
-    let parsed_npub = match nostr::PublicKey::from_bech32(&payload.npub) {
-        Ok(npub) => npub,
-        Err(e) => {
-            error!("notification start with invalid npub: {e}");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResp::new("Invalid npub")),
-            )
-                .into_response();
-        }
-    };
-    let x_only = match parsed_npub.xonly() {
-        Ok(x_only) => x_only,
+    let x_only = match util::validate_npub(&payload.npub) {
+        Ok(n) => n,
         Err(e) => {
             error!("notification start with invalid npub: {e}");
             return (
@@ -411,6 +343,135 @@ pub async fn register(
             (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResp::new("error checking challenge")),
+            )
+                .into_response()
+        }
+    }
+}
+
+pub async fn send(
+    State(state): State<AppState>,
+    Json(req): Json<NotificationSendReq>,
+) -> impl IntoResponse {
+    let payload = req.payload;
+    let signature = req.signature;
+    if let Err(e) = util::validate_npub(&payload.receiver) {
+        error!("notification send with invalid receiver npub: {e}");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResp::new("Invalid receiver npub")),
+        )
+            .into_response();
+    }
+
+    let x_only_sender = match util::validate_npub(&payload.sender) {
+        Ok(n) => n,
+        Err(e) => {
+            error!("notification send with invalid sender npub: {e}");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResp::new("Invalid sender npub")),
+            )
+                .into_response();
+        }
+    };
+
+    let notification_type = match PreferencesFlags::from_name(&payload.kind) {
+        Some(nt) => nt,
+        None => {
+            error!(
+                "notification send with invalid event type: {}",
+                &payload.kind
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResp::new("Invalid kind")),
+            )
+                .into_response();
+        }
+    };
+
+    if payload.id.is_empty() || !payload.id.starts_with(BITCR_PREFIX) {
+        error!("notification send with empty, or invalid id",);
+        return (StatusCode::BAD_REQUEST, Json(ErrorResp::new("Invalid ID"))).into_response();
+    }
+
+    // make sure sender signed the requesed
+    match util::verify_request(&payload, &signature, &x_only_sender) {
+        Ok(true) => {
+            let email_preferences = match state
+                .notification_store
+                .get_email_preferences_for_npub(&payload.receiver)
+                .await
+            {
+                Ok(Some(pref)) => pref,
+                Ok(None) => {
+                    // no mapping - ignore message
+                    return (StatusCode::OK, Json(SuccessResp::new("OK"))).into_response();
+                }
+                Err(e) => {
+                    error!("notification send error fetching email preferences: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResp::new("Error sending email")),
+                    )
+                        .into_response();
+                }
+            };
+
+            if !email_preferences.enabled {
+                // receiver does not want notifications - ignore message
+                return (StatusCode::OK, Json(SuccessResp::new("OK"))).into_response();
+            }
+
+            if !email_preferences.flags.contains(notification_type) {
+                // receiver does not want this notification type - ignore message
+                return (StatusCode::OK, Json(SuccessResp::new("OK"))).into_response();
+            }
+
+            let email_msg = match build_email_notification_message(
+                &state.cfg.host_url,
+                &email_preferences.token,
+                &state.cfg.email_from_address,
+                &email_preferences.email,
+                &notification_type.to_title(),
+                &notification_type.to_link(&email_preferences.ebill_url, &payload.id),
+            ) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    error!("notification register create confirmation mail error: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResp::new("send mail confirmation error")),
+                    )
+                        .into_response();
+                }
+            };
+
+            if let Err(e) = state.email_service.send(email_msg).await {
+                error!("notification send mail error: {e}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResp::new("Error sending mail")),
+                )
+                    .into_response();
+            }
+
+            (StatusCode::OK, Json(SuccessResp::new("OK"))).into_response()
+        }
+        Ok(false) => {
+            error!("notification send check invalid signature error");
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResp::new("invalid signature")),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            error!("notification send check signature error: {e}");
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResp::new("error checking signature")),
             )
                 .into_response()
         }
@@ -671,13 +732,6 @@ struct PreferencesContextContent {
     pub anon_email: String,
     pub anon_npub: String,
     pub flags: Vec<PreferencesContextContentFlag>,
-}
-
-#[derive(Debug, Serialize)]
-struct PreferencesContextContentFlag {
-    pub checked: bool,
-    pub value: i64,
-    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
