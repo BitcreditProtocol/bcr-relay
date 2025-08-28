@@ -396,7 +396,7 @@ pub async fn send(
         return (StatusCode::BAD_REQUEST, Json(ErrorResp::new("Invalid ID"))).into_response();
     }
 
-    // make sure sender signed the requesed
+    // make sure sender signed the request
     match util::verify_request(&payload, &signature, &x_only_sender) {
         Ok(true) => {
             let email_preferences = match state
