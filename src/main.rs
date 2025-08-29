@@ -1,6 +1,7 @@
 mod blossom;
 mod db;
 mod notification;
+mod rate_limit;
 mod relay;
 mod util;
 
@@ -20,18 +21,22 @@ use clap::Parser;
 use nostr::types::Url;
 use nostr_relay_builder::LocalRelay;
 use relay::RelayConfig;
+use tokio::sync::Mutex;
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
 };
 use tracing::{error, info};
 
-use crate::notification::{
-    email::{
-        mailjet::{MailjetConfig, MailjetService},
-        EmailService,
+use crate::{
+    notification::{
+        email::{
+            mailjet::{MailjetConfig, MailjetService},
+            EmailService,
+        },
+        notification_store::NotificationStoreApi,
     },
-    notification_store::NotificationStoreApi,
+    rate_limit::RateLimiter,
 };
 
 #[tokio::main]
@@ -120,6 +125,7 @@ struct AppState {
     pub file_store: Arc<dyn FileStoreApi>,
     pub notification_store: Arc<dyn NotificationStoreApi>,
     pub email_service: Arc<dyn EmailService>,
+    pub rate_limiter: Arc<Mutex<RateLimiter>>,
 }
 
 impl AppState {
@@ -142,6 +148,7 @@ impl AppState {
             file_store: store.clone(),
             notification_store: store,
             email_service: Arc::new(email_service),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new())),
         })
     }
 }
