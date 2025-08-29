@@ -173,7 +173,7 @@ impl NotificationStoreApi for PostgresStore {
             .get()
             .await?
             .query_opt(
-                "SELECT npub, enabled, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE npub = $1",
+                "SELECT npub, enabled, token, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE npub = $1",
                 &[&npub.to_string()],
             )
             .await?;
@@ -194,7 +194,7 @@ impl NotificationStoreApi for PostgresStore {
             .get()
             .await?
             .query_opt(
-                "SELECT npub, enabled, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE token = $1",
+                "SELECT npub, enabled, token, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE token = $1",
                 &[&token.to_string()],
             )
             .await?;
@@ -293,14 +293,16 @@ impl TryFrom<DbEmailConfirmation> for EmailConfirmation {
 fn row_to_db_email_preferences(row: &Row) -> DbEmailPreferences {
     let npub: String = row.get(0);
     let enabled: bool = row.get(1);
-    let email: String = row.get(2);
-    let email_confirmed: bool = row.get(3);
-    let ebill_url: String = row.get(4);
-    let flags: i64 = row.get(5);
+    let token: String = row.get(2);
+    let email: String = row.get(3);
+    let email_confirmed: bool = row.get(4);
+    let ebill_url: String = row.get(5);
+    let flags: i64 = row.get(6);
 
     DbEmailPreferences {
         npub,
         enabled,
+        token,
         email,
         email_confirmed,
         ebill_url,
@@ -312,6 +314,7 @@ fn row_to_db_email_preferences(row: &Row) -> DbEmailPreferences {
 pub struct DbEmailPreferences {
     pub npub: String,
     pub enabled: bool,
+    pub token: String,
     pub email: String,
     pub email_confirmed: bool,
     pub ebill_url: String,
@@ -325,6 +328,7 @@ impl TryFrom<DbEmailPreferences> for EmailPreferences {
         Ok(Self {
             npub: value.npub,
             enabled: value.enabled,
+            token: value.token,
             email: value.email,
             email_confirmed: value.email_confirmed,
             ebill_url: url::Url::parse(&value.ebill_url)?,

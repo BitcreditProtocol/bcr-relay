@@ -56,3 +56,44 @@ pub fn build_email_confirmation_message(
         body: rendered,
     })
 }
+
+#[derive(Serialize)]
+struct NotificationContext {
+    pub logo_link: String,
+    pub title: String,
+    pub link: String,
+    pub preferences_link: String,
+}
+
+pub fn build_email_notification_message(
+    host_url: &url::Url,
+    preferences_token: &str,
+    from: &str,
+    to: &str,
+    title: &str,
+    link: &str,
+) -> Result<EmailMessage, anyhow::Error> {
+    let mut tt = TinyTemplate::new();
+    tt.add_template("mail", template::NOTIFICATION_MAIL_TEMPLATE)?;
+
+    // build email preferences link
+    let preferences_link = host_url
+        .join(&format!("/notifications/preferences/{}", preferences_token))
+        .expect("email notification mail");
+
+    let context = NotificationContext {
+        logo_link: get_logo_link(host_url),
+        title: title.to_owned(),
+        link: link.to_owned(),
+        preferences_link: preferences_link.to_string(),
+    };
+
+    let rendered = tt.render("mail", &context)?;
+
+    Ok(EmailMessage {
+        from: from.to_owned(),
+        to: to.to_owned(),
+        subject: title.to_owned(),
+        body: rendered,
+    })
+}

@@ -53,7 +53,6 @@ pub const MAIL_CONFIRMATION_TEMPLATE: &str = r#"
 </html>
 "#;
 
-#[allow(unused)]
 pub const NOTIFICATION_MAIL_TEMPLATE: &str = r#"
 <!doctype html>
 <html lang="en">
@@ -96,11 +95,12 @@ pub const NOTIFICATION_MAIL_TEMPLATE: &str = r#"
                         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="650" class="container" style="width:650px; max-width:650px;">
                             <tr><td style="height:44px; line-height:44px;">&nbsp;</td></tr>
                         </table>
+                        <hr style="border: 1px solid #efefef; width: 600px;" />
                         <tr>
                             <td align="center" class="px" style="padding:16px 24px 28px 24px; font-family:Geist, system-ui, sans-serif; font-size:13px; line-height:20px; color:#333333;">
-                                <a href="{notification_link}" style="color:#333333; text-decoration:none;">Manage notification settings</a>
+                                <a href="{preferences_link}" style="color:#333333; text-decoration:none;">Manage notification settings</a>
                                 &nbsp;&nbsp;&nbsp;&nbsp;
-                                <a href="{browser_link}" style="color:#333333; text-decoration:none;">View in the browser</a>
+                                <a href="{link}" style="color:#333333; text-decoration:none;">View in the browser</a>
                             </td>
                         </tr>
                     </table>

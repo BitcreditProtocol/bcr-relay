@@ -36,3 +36,5 @@ bitflags = "2.9"
 reqwest = { version = "0.12", default-features = false, features = ["default", "json"] }
 base64 = "0.22"
 tinytemplate = "1.2"
+borsh = "1.5"
+borsh-derive = "1.5"

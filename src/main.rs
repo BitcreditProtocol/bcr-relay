@@ -60,6 +60,7 @@ async fn main() -> Result<()> {
         .route("/", delete(blossom::handle_delete))
         .route("/notifications/v1/start", post(notification::start))
         .route("/notifications/v1/register", post(notification::register))
+        .route("/notifications/v1/send", post(notification::send))
         .route(
             "/notifications/confirm_email",
             get(notification::confirm_email),
