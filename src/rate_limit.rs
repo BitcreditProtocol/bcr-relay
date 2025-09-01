@@ -1,5 +1,12 @@
+use axum::{
+    extract::{ConnectInfo, FromRequestParts},
+    http::{request::Parts, StatusCode},
+};
 use chrono::{DateTime, Duration, Utc};
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    net::{IpAddr, SocketAddr},
+};
 
 /// How often do we allow the same ip in the time frame
 const IP_LIMIT: usize = 100;
@@ -27,7 +34,7 @@ struct SlidingWindow {
 impl SlidingWindow {
     fn new(limit: usize, window: Duration) -> Self {
         Self {
-            hits: VecDeque::new(),
+            hits: VecDeque::with_capacity(limit),
             window,
             limit,
             last_seen: Utc::now(),
@@ -58,7 +65,8 @@ impl SlidingWindow {
 pub struct RateLimiter {
     by_ip: HashMap<String, SlidingWindow>,
     by_email: HashMap<String, SlidingWindow>,
-    by_npub: HashMap<String, SlidingWindow>,
+    by_npub_sender: HashMap<String, SlidingWindow>,
+    by_npub_receiver: HashMap<String, SlidingWindow>,
     last_prune: DateTime<Utc>,
 }
 
@@ -67,7 +75,8 @@ impl RateLimiter {
         Self {
             by_ip: HashMap::new(),
             by_email: HashMap::new(),
-            by_npub: HashMap::new(),
+            by_npub_sender: HashMap::new(),
+            by_npub_receiver: HashMap::new(),
             last_prune: Utc::now(),
         }
     }
@@ -75,7 +84,13 @@ impl RateLimiter {
     /// Check if the request is allowed
     /// There is always an IP, but not always an email, or npub - everything that's set has to be allowed
     /// The values are expected to be validated before getting in here
-    pub fn check(&mut self, ip: &str, email: Option<&str>, npub: Option<&str>) -> bool {
+    pub fn check(
+        &mut self,
+        ip: &str,
+        email: Option<&str>,
+        npub_sender: Option<&str>,
+        npub_receiver: Option<&str>,
+    ) -> bool {
         let now = Utc::now();
         self.prune_if_needed(now);
 
@@ -95,16 +110,25 @@ impl RateLimiter {
             true // no email provided -> skip check
         };
 
-        let npub_ok = if let Some(npub) = npub {
-            self.by_npub
+        let npub_sender_ok = if let Some(npub) = npub_sender {
+            self.by_npub_sender
                 .entry(npub.to_string())
                 .or_insert_with(|| SlidingWindow::new(NPUB_LIMIT, NPUB_WINDOW))
                 .allow(now)
         } else {
-            true // no npub provided -> skip check
+            true // no sender npub provided -> skip check
         };
 
-        ip_ok && email_ok && npub_ok
+        let npub_receiver_ok = if let Some(npub) = npub_receiver {
+            self.by_npub_receiver
+                .entry(npub.to_string())
+                .or_insert_with(|| SlidingWindow::new(NPUB_LIMIT, NPUB_WINDOW))
+                .allow(now)
+        } else {
+            true // no received npub provided -> skip check
+        };
+
+        ip_ok && email_ok && npub_sender_ok && npub_receiver_ok
     }
 
     /// Every PRUNE_INTERVAL, remove outdated entries
@@ -119,7 +143,35 @@ impl RateLimiter {
         self.by_ip.retain(|_, win| now - win.last_seen <= MAX_IDLE);
         self.by_email
             .retain(|_, win| now - win.last_seen <= MAX_IDLE);
-        self.by_npub
+        self.by_npub_sender
             .retain(|_, win| now - win.last_seen <= MAX_IDLE);
+    }
+}
+
+pub struct RealIp(pub IpAddr);
+
+impl<S> FromRequestParts<S> for RealIp
+where
+    S: Send + Sync,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // Check X-FORWARDED-FOR header and take the first value for gcp as per
+        // https://cloud.google.com/functions/docs/reference/headers#x-forwarded-for
+        if let Some(forwarded) = parts.headers.get("x-forwarded-for")
+            && let Ok(s) = forwarded.to_str()
+            && let Some(ip_str) = s.split(',').next()
+            && let Ok(ip) = ip_str.trim().parse()
+        {
+            return Ok(RealIp(ip));
+        }
+
+        // Fallback to socket addr for local dev
+        if let Some(addr) = parts.extensions.get::<ConnectInfo<SocketAddr>>() {
+            return Ok(RealIp(addr.ip()));
+        }
+
+        Err((StatusCode::BAD_REQUEST, "No request IP"))
     }
 }

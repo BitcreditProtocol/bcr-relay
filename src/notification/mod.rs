@@ -1,7 +1,5 @@
-use std::net::SocketAddr;
-
 use axum::{
-    extract::{ConnectInfo, Path, Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect},
     Json,
@@ -20,6 +18,7 @@ use crate::{
         email::{build_email_confirmation_message, build_email_notification_message},
         preferences::{PreferencesContextContentFlag, PreferencesFlags},
     },
+    rate_limit::RealIp,
     util::{self, get_logo_link},
     AppState,
 };
@@ -152,7 +151,7 @@ pub struct ChangePreferencesReq {
 /// Send back a random challenge to the caller, which we expect to be signed with their npub to validate
 /// the request actually comes from the given npub
 pub async fn start(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    RealIp(ip): RealIp,
     State(state): State<AppState>,
     Json(payload): Json<NotificationStartReq>,
 ) -> impl IntoResponse {
@@ -166,12 +165,12 @@ pub async fn start(
     }
 
     let mut rate_limiter = state.rate_limiter.lock().await;
-    let allowed = rate_limiter.check(&addr.ip().to_string(), None, Some(&payload.npub));
+    let allowed = rate_limiter.check(&ip.to_string(), None, None, Some(&payload.npub));
     drop(rate_limiter);
     if !allowed {
         warn!(
             "Rate limited req from {} with npub {}",
-            &addr.ip().to_string(),
+            &ip.to_string(),
             &payload.npub
         );
         return (
@@ -206,7 +205,7 @@ pub async fn start(
 /// We validate npub, email and signed challenge. If everything is OK, we send a confirmation email
 /// and we create a stub for email preferences with a token to change them later
 pub async fn register(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    RealIp(ip): RealIp,
     State(state): State<AppState>,
     Json(payload): Json<NotificationRegisterReq>,
 ) -> impl IntoResponse {
@@ -236,15 +235,16 @@ pub async fn register(
 
     let mut rate_limiter = state.rate_limiter.lock().await;
     let allowed = rate_limiter.check(
-        &addr.ip().to_string(),
+        &ip.to_string(),
         Some(&payload.email),
+        None,
         Some(&payload.npub),
     );
     drop(rate_limiter);
     if !allowed {
         warn!(
             "Rate limited req from {} with npub {} and email {}",
-            &addr.ip().to_string(),
+            &ip.to_string(),
             &payload.npub,
             &payload.email,
         );
@@ -391,7 +391,7 @@ pub async fn register(
 }
 
 pub async fn send(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    RealIp(ip): RealIp,
     State(state): State<AppState>,
     Json(req): Json<NotificationSendReq>,
 ) -> impl IntoResponse {
@@ -402,22 +402,6 @@ pub async fn send(
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResp::new("Invalid receiver npub")),
-        )
-            .into_response();
-    }
-
-    let mut rate_limiter = state.rate_limiter.lock().await;
-    let allowed = rate_limiter.check(&addr.ip().to_string(), None, Some(&payload.receiver));
-    drop(rate_limiter);
-    if !allowed {
-        warn!(
-            "Rate limited req from {} with npub {}",
-            &addr.ip().to_string(),
-            &payload.receiver
-        );
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(ErrorResp::new("Please try again later")),
         )
             .into_response();
     }
@@ -433,6 +417,27 @@ pub async fn send(
                 .into_response();
         }
     };
+
+    let mut rate_limiter = state.rate_limiter.lock().await;
+    let allowed = rate_limiter.check(
+        &ip.to_string(),
+        None,
+        Some(&payload.sender),
+        Some(&payload.receiver),
+    );
+    drop(rate_limiter);
+    if !allowed {
+        warn!(
+            "Rate limited req from {} with npub {}",
+            &ip.to_string(),
+            &payload.receiver
+        );
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorResp::new("Please try again later")),
+        )
+            .into_response();
+    }
 
     let notification_type = match PreferencesFlags::from_name(&payload.kind) {
         Some(nt) => nt,
