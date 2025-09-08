@@ -1,11 +1,11 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect},
-    Json,
 };
 use axum_extra::extract::Form;
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use borsh_derive::BorshSerialize;
 use chrono::{DateTime, Duration, Utc};
 use rand::RngCore;
@@ -14,13 +14,13 @@ use tinytemplate::TinyTemplate;
 use tracing::{error, warn};
 
 use crate::{
+    AppState,
     notification::{
         email::{build_email_confirmation_message, build_email_notification_message},
         preferences::{PreferencesContextContentFlag, PreferencesFlags},
     },
     rate_limit::RealIp,
     util::{self, get_logo_link},
-    AppState,
 };
 
 pub mod email;

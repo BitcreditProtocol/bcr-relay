@@ -3,16 +3,16 @@ pub mod file_store;
 use std::io::Write;
 
 use axum::{
+    Json,
     body::{Body, Bytes},
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use nostr::{
     hashes::{
-        sha256::{self, Hash as Sha256Hash},
         Hash,
+        sha256::{self, Hash as Sha256Hash},
     },
     types::Url,
 };

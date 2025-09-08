@@ -1,6 +1,6 @@
 use axum::{
     extract::{ConnectInfo, FromRequestParts},
-    http::{request::Parts, StatusCode},
+    http::{StatusCode, request::Parts},
 };
 use chrono::{DateTime, Duration, Utc};
 use std::{
