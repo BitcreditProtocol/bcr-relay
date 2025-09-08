@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use nostr::types::Url;
 use nostr_relay_builder::{
-    builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
     LocalRelay, RelayBuilder,
+    builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
 };
 use nostr_sqldb::*;
 use tracing::info;

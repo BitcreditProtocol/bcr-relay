@@ -9,11 +9,12 @@ use std::{net::SocketAddr, sync::Arc};
 
 use anyhow::Result;
 use axum::{
+    Router,
     extract::{ConnectInfo, State},
     http::{StatusCode, Uri},
     response::IntoResponse,
     routing::{any, delete, get, head, post, put},
-    serve, Router,
+    serve,
 };
 use axum_raw_websocket::RawSocketUpgrade;
 use blossom::file_store::FileStoreApi;
@@ -31,8 +32,8 @@ use tracing::{error, info};
 use crate::{
     notification::{
         email::{
-            mailjet::{MailjetConfig, MailjetService},
             EmailService,
+            mailjet::{MailjetConfig, MailjetService},
         },
         notification_store::NotificationStoreApi,
     },

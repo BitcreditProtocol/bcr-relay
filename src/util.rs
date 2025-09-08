@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use nostr::hashes::{sha256, Hash};
+use nostr::hashes::{Hash, sha256};
 use nostr::nips::nip19::FromBech32;
-use nostr::secp256k1::{schnorr::Signature, Message, XOnlyPublicKey, SECP256K1};
+use nostr::secp256k1::{Message, SECP256K1, XOnlyPublicKey, schnorr::Signature};
 
 const LOGO_FILE_NAME: &str = "static/logo.png";
 const ANON_HEAD_TAIL: usize = 2;
