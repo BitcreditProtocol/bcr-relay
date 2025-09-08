@@ -39,7 +39,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Activate cache
-        uses: Swatinem/rust-cache@v2.7.5
+        uses: Swatinem/rust-cache@v2.8.0
 
       - name: run tests
         run: cargo test --verbose
