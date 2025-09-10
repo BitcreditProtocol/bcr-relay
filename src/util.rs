@@ -1,11 +1,52 @@
+use ipnet::IpNet;
+use std::net::IpAddr;
 use std::str::FromStr;
 
 use nostr::hashes::{Hash, sha256};
 use nostr::nips::nip19::FromBech32;
 use nostr::secp256k1::{Message, SECP256K1, XOnlyPublicKey, schnorr::Signature};
+use url::Url;
 
 const LOGO_FILE_NAME: &str = "static/logo.png";
 const ANON_HEAD_TAIL: usize = 2;
+
+// private, or reserved networks
+const BLOCKED_NETWORKS: [&str; 15] = [
+    "127.0.0.0/8",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "100.64.0.0/10",
+    "0.0.0.0/8",
+    "224.0.0.0/4",
+    "198.18.0.0/15",
+    "255.255.255.255/32",
+    "::1/128",
+    "::/128",
+    "fc00::/7",
+    "fe80::/10",
+    "ff00::/8",
+];
+
+/// We only accept https URLs with a host and without username/pw
+pub fn is_valid_proxy_url(url: &Url) -> bool {
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.has_host()
+}
+
+pub fn is_blocked_proxy_host_ip(ip: IpAddr) -> bool {
+    ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() || is_in_blocked_network(ip)
+}
+
+fn is_in_blocked_network(ip: IpAddr) -> bool {
+    BLOCKED_NETWORKS.iter().any(|cidr| {
+        let net: IpNet = cidr.parse().expect("valid networks");
+        net.contains(&ip)
+    })
+}
 
 pub fn validate_npub(npub: &str) -> Result<XOnlyPublicKey, anyhow::Error> {
     let parsed_npub = nostr::PublicKey::from_bech32(npub)?;
@@ -81,7 +122,7 @@ where
 pub mod tests {
     use std::str::FromStr;
 
-    use crate::notification::NotificationSendPayload;
+    use crate::{notification::NotificationSendPayload, proxy::ProxyReqPayload};
 
     use super::*;
     use nostr::{
@@ -143,6 +184,26 @@ pub mod tests {
         let sig = sign_request(&req, &secret_key);
         // print to be able to manually create requests with -- --nocapture
         println!("req sig: {sig}");
+        let verified = verify_request(&req, &sig, &x_only_pub);
+        assert!(verified.is_ok());
+        assert!(verified.as_ref().unwrap());
+    }
+
+    #[test]
+    fn sig_req_proxy_test() {
+        let secret_key =
+            SecretKey::from_str("8863c82829480536893fc49c4b30e244f97261e989433373d73c648c1a656a79")
+                .unwrap();
+        let x_only_pub = secret_key.public_key(SECP256K1).x_only_public_key().0;
+
+        let req = ProxyReqPayload {
+            npub: "npub1ypdcmmqjhj0g086m29a2xgvj5f2saz9dem372nkzcu55sqjk3lhsu057p8".to_string(),
+            url: "https://primal.net/e/nevent1qqs24kk3m0rc8e7a6f8k8daddqes0a2n74jszdszppu84e6y5q8ss3cy2rxs4".to_string(),
+        };
+
+        let sig = sign_request(&req, &secret_key);
+        // print to be able to manually create requests with -- --nocapture
+        println!("req sig proxy: {sig}");
         let verified = verify_request(&req, &sig, &x_only_pub);
         assert!(verified.is_ok());
         assert!(verified.as_ref().unwrap());
