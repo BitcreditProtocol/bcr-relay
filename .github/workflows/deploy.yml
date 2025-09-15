@@ -1,0 +1,121 @@
+name: 'Deploy to Cloud Run'
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'deploy tag to environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+jobs:
+
+######################################################################
+# env:  prod (bcr-relay)
+  deploy:
+    name: deploy to prod
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.inputs.environment || github.event_name }}
+      cancel-in-progress: true
+
+    runs-on: ubuntu-latest
+    environment: prod
+
+    env:
+      GCR_SERVICE: ${{ vars.GCR_SERVICE }}
+      GCR_REGION: ${{ vars.GCR_REGION }}
+      GAR_PATH: ${{ vars.GAR_PATH }}
+      IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+
+    steps:
+      - name: Validate tag on dispatch
+        run: |
+          if [[ "${{ github.ref_type }}" != 'tag' ]]; then
+            echo "::error::Manual deployments must be triggered from a tag."
+            echo "::error::Please select a tag from the 'Use workflow from' dropdown, not a branch."
+            exit 1
+          fi
+          echo "Validation successful: Running from tag '${{ github.ref_name }}'."
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: 'Set image tag to ${{ github.ref_name }}'
+        id: tag
+        run: |
+          TAG=${{ github.ref_name }}
+          SEMVER_TAG="${TAG#v}"
+          echo "IMAGE_TAG=$SEMVER_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3
+        with:
+          service:  ${{ env.GCR_SERVICE }}
+          region:   ${{ env.GCR_REGION }}
+          image:    ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.IMAGE_TAG }}
+
+######################################################################
+# env:  dev (bcr-relay-dev)
+  deploy-dev:
+    name: deploy to dev
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev'
+
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.inputs.environment || github.event_name }}
+      cancel-in-progress: true
+
+    runs-on: ubuntu-latest
+    environment: dev
+
+    env:
+      GCR_SERVICE: ${{ vars.GCR_SERVICE }}
+      GCR_REGION: ${{ vars.GCR_REGION }}
+      GAR_PATH: ${{ vars.GAR_PATH }}
+      IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+
+    steps:
+      - name: Validate tag on dispatch
+        run: |
+          if [[ "${{ github.ref_type }}" != 'tag' ]]; then
+            echo "::error::Manual deployments must be triggered from a tag."
+            echo "::error::Please select a tag from the 'Use workflow from' dropdown, not a branch."
+            exit 1
+          fi
+          echo "Validation successful: Running from tag '${{ github.ref_name }}'."
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: 'Set image tag to ${{ github.ref_name }}'
+        id: tag
+        run: |
+          TAG=${{ github.ref_name }}
+          SEMVER_TAG="${TAG#v}"
+          echo "IMAGE_TAG=$SEMVER_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3
+        with:
+          service:  ${{ env.GCR_SERVICE }}
+          region:   ${{ env.GCR_REGION }}
+          image:    ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.IMAGE_TAG }}
