@@ -158,7 +158,8 @@ where
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // Check X-FORWARDED-FOR header and take the first value for gcp as per
-        // https://cloud.google.com/functions/docs/reference/headers#x-forwarded-for
+        // Cloud Run: https://cloud.google.com/functions/docs/reference/headers#x-forwarded-for
+        // GCP LB: https://cloud.google.com/load-balancing/docs/https
         if let Some(forwarded) = parts.headers.get("x-forwarded-for")
             && let Ok(s) = forwarded.to_str()
             && let Some(ip_str) = s.split(',').next()

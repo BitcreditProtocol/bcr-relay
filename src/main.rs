@@ -1,15 +1,20 @@
 mod blossom;
 mod db;
 mod notification;
+mod proxy;
 mod rate_limit;
 mod relay;
 mod util;
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
+
+use hickory_resolver::Resolver;
+use hickory_resolver::config::*;
+use hickory_resolver::name_server::TokioConnectionProvider;
 
 use anyhow::Result;
 use axum::{
-    Router,
+    Json, Router,
     extract::{ConnectInfo, State},
     http::{StatusCode, Uri},
     response::IntoResponse,
@@ -22,6 +27,8 @@ use clap::Parser;
 use nostr::types::Url;
 use nostr_relay_builder::LocalRelay;
 use relay::RelayConfig;
+use reqwest::redirect;
+use serde::Serialize;
 use tokio::sync::Mutex;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -37,6 +44,7 @@ use crate::{
         },
         notification_store::NotificationStoreApi,
     },
+    proxy::{PROXY_REQ_TIMEOUT_SEC, ProxyClient},
     rate_limit::RateLimiter,
 };
 
@@ -64,6 +72,7 @@ async fn main() -> Result<()> {
         .route("/{hash}", get(blossom::handle_get_file))
         .route("/{hash}", head(blossom::handle_get_file_head))
         .route("/", delete(blossom::handle_delete))
+        .route("/proxy/v1/req", post(proxy::req))
         .route("/notifications/v1/start", post(notification::start))
         .route("/notifications/v1/register", post(notification::register))
         .route("/notifications/v1/send", post(notification::send))
@@ -79,6 +88,7 @@ async fn main() -> Result<()> {
             "/notifications/update_preferences",
             post(notification::update_preferences),
         )
+        .route("/relay_features", get(features_handler))
         .route("/", any(websocket_handler))
         .fallback(handle_404)
         .with_state(app_state)
@@ -108,6 +118,40 @@ async fn websocket_handler(
     ws.on_upgrade(async move |socket| state.relay.take_connection(socket, address).await.unwrap())
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct RelayFeatures {
+    pub relay_version: String,
+    pub features: Vec<RelayFeature>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RelayFeature {
+    pub name: String,
+    pub version: String,
+}
+
+/// An endpoint to check the capabilities of this relay in the context of our custom relay implementations
+async fn features_handler() -> impl IntoResponse {
+    let features = RelayFeatures {
+        relay_version: "0.1.0".to_string(),
+        features: vec![
+            RelayFeature {
+                name: "file_upload".to_string(),
+                version: "1".to_string(),
+            },
+            RelayFeature {
+                name: "email_notifications".to_string(),
+                version: "1".to_string(),
+            },
+            RelayFeature {
+                name: "proxy".to_string(),
+                version: "1".to_string(),
+            },
+        ],
+    };
+    (StatusCode::OK, Json(features)).into_response()
+}
+
 /// Handle all 404 errors as a fallback
 async fn handle_404(uri: Uri) -> impl IntoResponse {
     info!("404 not found: {uri}");
@@ -127,6 +171,7 @@ struct AppState {
     pub notification_store: Arc<dyn NotificationStoreApi>,
     pub email_service: Arc<dyn EmailService>,
     pub rate_limiter: Arc<Mutex<RateLimiter>>,
+    pub proxy_client: ProxyClient,
 }
 
 impl AppState {
@@ -140,6 +185,18 @@ impl AppState {
             api_secret_key: config.email_api_secret_key.clone(),
             url: config.email_url.clone(),
         });
+
+        let proxy_client = ProxyClient {
+            dns_resolver: Resolver::builder_with_config(
+                ResolverConfig::default(),
+                TokioConnectionProvider::default(),
+            )
+            .build(),
+            cl: reqwest::Client::builder()
+                .timeout(Duration::from_secs(PROXY_REQ_TIMEOUT_SEC))
+                .redirect(redirect::Policy::none()) // manually handle redirects
+                .build()?,
+        };
         Ok(Self {
             relay: relay::init(config).await?,
             cfg: AppConfig {
@@ -150,6 +207,7 @@ impl AppState {
             notification_store: store,
             email_service: Arc::new(email_service),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new())),
+            proxy_client,
         })
     }
 }
