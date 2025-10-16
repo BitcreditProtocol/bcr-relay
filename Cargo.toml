@@ -5,14 +5,10 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-nostr-sdk = { git = "https://github.com/BitcreditProtocol/nostr.git", features = [
-  "nip59",
-] }
-nostr = { git = "https://github.com/BitcreditProtocol/nostr.git" }
-nostr-relay-builder = { git = "https://github.com/BitcreditProtocol/nostr.git", branch = "sqldb" }
-nostr-sqldb = { git = "https://github.com/BitcreditProtocol/nostr.git", branch = "sqldb", features = [
-  "postgres",
-] }
+nostr-sdk = { version = "0.43", features = ["nip59"] }
+nostr = "0.43"
+nostr-relay-builder = "0.43"
+nostr-postgres-db = { git = "https://github.com/BitcreditProtocol/nostr-postgres-db.git", branch = "master" }
 tokio = "1.45.1"
 axum = { version = "0.8.3", features = ["ws", "tokio"] }
 axum-extra = { version = "0.10", features = ["form"] }
@@ -29,11 +25,14 @@ async-trait = "0.1"
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 deadpool-postgres = "0.14"
 hex = { version = "0.4" }
-rand = { version = "0.8" }
+rand = { version = "0.9" }
 url = { version = "2.5" }
 email_address = "0.2"
 bitflags = "2.9"
-reqwest = { version = "0.12", default-features = false, features = ["default", "json"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "default",
+  "json",
+] }
 base64 = "0.22"
 tinytemplate = "1.2"
 borsh = "1.5"

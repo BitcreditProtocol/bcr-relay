@@ -181,7 +181,7 @@ pub async fn start(
     }
 
     let mut random_bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut random_bytes);
+    rand::rng().fill_bytes(&mut random_bytes);
     let challenge = hex::encode(random_bytes);
 
     if let Err(e) = state
@@ -309,7 +309,7 @@ pub async fn register(
 
             // send email confirmation mail
             let mut random_bytes = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut random_bytes);
+            rand::rng().fill_bytes(&mut random_bytes);
             let email_confirmation_token = URL_SAFE_NO_PAD.encode(random_bytes);
             let email_msg = match build_email_confirmation_message(
                 &state.cfg.host_url,
@@ -338,7 +338,7 @@ pub async fn register(
             }
 
             let mut random_bytes_pref_token = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut random_bytes_pref_token);
+            rand::rng().fill_bytes(&mut random_bytes_pref_token);
             let preferences_token = URL_SAFE_NO_PAD.encode(random_bytes_pref_token);
 
             // persist email confirmation state email notification preferences with token to change them
