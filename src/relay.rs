@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Parser;
 use nostr::types::Url;
+use nostr_postgres_db::*;
 use nostr_relay_builder::{
     LocalRelay, RelayBuilder,
     builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
 };
-use nostr_sqldb::*;
 use tracing::info;
 
 pub async fn init(config: &RelayConfig) -> Result<LocalRelay> {

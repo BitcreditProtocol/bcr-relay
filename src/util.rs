@@ -156,7 +156,7 @@ pub mod tests {
                 .unwrap();
         let x_only_pub = secret_key.public_key(SECP256K1).x_only_public_key().0;
         let mut random_bytes = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut random_bytes);
+        rand::rng().fill_bytes(&mut random_bytes);
 
         let challenge = hex::encode(random_bytes);
         let sig = signature(&challenge, &secret_key);
