@@ -21,8 +21,17 @@ unmaintained = "workspace"
 # More documentation for the licenses section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
-allow = ["MIT", "Apache-2.0", "Unicode-3.0", "Unlicense", "CDLA-Permissive-2.0", "ISC", "CC0-1.0",
-     "BSD-3-Clause", "Zlib", "BSD-2-Clause",
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "CC0-1.0",
+  "BSD-3-Clause",
+  "Zlib",
+  "BSD-2-Clause",
 ]
 confidence-threshold = 0.8
 exceptions = []
@@ -59,6 +68,6 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
 
 [sources.allow-org]
-github = ["BitcreditProtocol", "tompro"]
+github = ["BitcreditProtocol"]
 gitlab = []
 bitbucket = []
