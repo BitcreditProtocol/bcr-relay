@@ -12,7 +12,7 @@ nostr-postgres-db = { git = "https://github.com/BitcreditProtocol/nostr-postgres
 tokio = "1.45.1"
 axum = { version = "0.8.3", features = ["ws", "tokio"] }
 axum-extra = { version = "0.10", features = ["form"] }
-axum-raw-websocket = { git = "https://github.com/tompro/axum-raw-websocket.git" }
+axum-raw-websocket = "0.8"
 anyhow = "1"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.20"
