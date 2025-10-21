@@ -1,19 +1,19 @@
 use anyhow::Result;
 use clap::Parser;
+use deadpool_postgres::Pool;
 use nostr::types::Url;
 use nostr_postgres_db::*;
 use nostr_relay_builder::{
     LocalRelay, RelayBuilder,
     builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
 };
-use tracing::info;
 
-pub async fn init(config: &RelayConfig) -> Result<LocalRelay> {
-    Ok(LocalRelay::new(builder(config).await?).await?)
+pub async fn init(config: &RelayConfig, pool: Pool) -> Result<LocalRelay> {
+    Ok(LocalRelay::new(builder(config, pool).await?).await?)
 }
 
-async fn builder(config: &RelayConfig) -> Result<RelayBuilder> {
-    let dba = database(&config.db_connection_string()).await?;
+async fn builder(_config: &RelayConfig, pool: Pool) -> Result<RelayBuilder> {
+    let dba = database(pool).await?;
     Ok(RelayBuilder::default().nip42(auth_mode()).database(dba))
 }
 
@@ -24,11 +24,8 @@ fn auth_mode() -> RelayBuilderNip42 {
     }
 }
 
-async fn database(db_url: &str) -> Result<NostrPostgres> {
-    info!("Starting database migrations on {}", db_url);
-    run_migrations(db_url)?;
-    info!("Creating async database connection pool for {}", db_url);
-    Ok(NostrPostgres::new(db_url).await?)
+async fn database(pool: Pool) -> Result<NostrPostgres> {
+    Ok(NostrPostgres::from_pool(pool).await?)
 }
 
 #[derive(Debug, Clone, Parser)]
