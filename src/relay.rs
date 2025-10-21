@@ -28,7 +28,8 @@ async fn database(db_url: &str) -> Result<NostrPostgres> {
     info!("Starting database migrations on {}", db_url);
     run_migrations(db_url)?;
     info!("Creating async database connection pool for {}", db_url);
-    Ok(NostrPostgres::new(db_url).await?)
+    let pool = postgres_connection_pool(db_url).await?;
+    Ok(NostrPostgres::from(pool))
 }
 
 #[derive(Debug, Clone, Parser)]
