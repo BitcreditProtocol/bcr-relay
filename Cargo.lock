@@ -264,7 +264,10 @@ dependencies = [
  "borsh-derive",
  "chrono",
  "clap",
+ "deadpool",
  "deadpool-postgres",
+ "diesel",
+ "diesel-async",
  "email_address",
  "hex",
  "hickory-resolver",
@@ -675,6 +678,7 @@ checksum = "e8496eeb328dce26ee9d9b73275d396d9bddb433fa30106cf6056dd8c3c2764c"
 dependencies = [
  "bitflags",
  "byteorder",
+ "chrono",
  "diesel_derives",
  "downcast-rs",
  "itoa",

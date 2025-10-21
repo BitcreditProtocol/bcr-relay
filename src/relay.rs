@@ -7,14 +7,15 @@ use nostr_relay_builder::{
     builder::{RelayBuilderNip42, RelayBuilderNip42Mode},
 };
 use tracing::info;
+use diesel_async::{AsyncPgConnection, pooled_connection::AsyncDieselConnectionManager};
+use deadpool::managed::Pool;
 
-pub async fn init(config: &RelayConfig) -> Result<LocalRelay> {
-    Ok(LocalRelay::new(builder(config).await?).await?)
+pub async fn init(db: NostrPostgres) -> Result<LocalRelay> {
+    Ok(LocalRelay::new(builder(db).await?).await?)
 }
 
-async fn builder(config: &RelayConfig) -> Result<RelayBuilder> {
-    let dba = database(&config.db_connection_string()).await?;
-    Ok(RelayBuilder::default().nip42(auth_mode()).database(dba))
+async fn builder(db: NostrPostgres) -> Result<RelayBuilder> {
+    Ok(RelayBuilder::default().nip42(auth_mode()).database(db))
 }
 
 fn auth_mode() -> RelayBuilderNip42 {
@@ -24,12 +25,12 @@ fn auth_mode() -> RelayBuilderNip42 {
     }
 }
 
-async fn database(db_url: &str) -> Result<NostrPostgres> {
+pub async fn create_database_pool(db_url: &str) -> Result<Pool<AsyncDieselConnectionManager<AsyncPgConnection>>> {
     info!("Starting database migrations on {}", db_url);
     run_migrations(db_url)?;
     info!("Creating async database connection pool for {}", db_url);
     let pool = postgres_connection_pool(db_url).await?;
-    Ok(NostrPostgres::from(pool))
+    Ok(pool)
 }
 
 #[derive(Debug, Clone, Parser)]

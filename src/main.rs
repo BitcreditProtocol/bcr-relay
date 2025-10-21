@@ -176,9 +176,13 @@ struct AppState {
 
 impl AppState {
     pub async fn new(config: &RelayConfig) -> Result<Self> {
-        let db = db::PostgresStore::new(&config.db_connection_string()).await?;
-        db.init().await?;
-        let store = Arc::new(db);
+        // Create the shared database pool
+        let pool = relay::create_database_pool(&config.db_connection_string()).await?;
+        
+        // Initialize app-specific tables
+        let pg_store = db::PostgresStore::new(pool.clone());
+        pg_store.init().await?;
+        let store = Arc::new(pg_store);
 
         let email_service = MailjetService::new(&MailjetConfig {
             api_key: config.email_api_key.clone(),
@@ -197,8 +201,12 @@ impl AppState {
                 .redirect(redirect::Policy::none()) // manually handle redirects
                 .build()?,
         };
+        
+        // Create NostrPostgres from the pool
+        let db = nostr_postgres_db::NostrPostgres::from(pool);
+        
         Ok(Self {
-            relay: relay::init(config).await?,
+            relay: relay::init(db).await?,
             cfg: AppConfig {
                 host_url: config.host_url.clone(),
                 email_from_address: config.email_from_address.clone(),

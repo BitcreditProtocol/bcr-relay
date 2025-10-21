@@ -2,10 +2,22 @@ use std::str::FromStr;
 
 use crate::db::PostgresStore;
 use async_trait::async_trait;
+use diesel::prelude::*;
+use diesel::sql_types::{Bytea, Integer, Text};
+use diesel_async::RunQueryDsl;
 use nostr::hashes::sha256::Hash as Sha256Hash;
-use tokio_postgres::Row;
 
 use super::File;
+
+#[derive(QueryableByName, Debug)]
+struct DbFile {
+    #[diesel(sql_type = Text)]
+    hash: String,
+    #[diesel(sql_type = Bytea)]
+    data: Vec<u8>,
+    #[diesel(sql_type = Integer)]
+    size: i32,
+}
 
 #[async_trait]
 pub trait FileStoreApi: Send + Sync {
@@ -16,77 +28,43 @@ pub trait FileStoreApi: Send + Sync {
 #[async_trait]
 impl FileStoreApi for PostgresStore {
     async fn get(&self, hash: &Sha256Hash) -> Result<Option<File>, anyhow::Error> {
-        let row = self
-            .pool
-            .get()
-            .await?
-            .query_opt(
-                "SELECT hash, data, size FROM files WHERE hash = $1",
-                &[&hash.to_string()],
-            )
-            .await?;
-        let db_file = row.map(|r| row_to_db_file(&r));
+        let hash_str = hash.to_string();
+        let mut conn = self.get_connection().await?;
+        
+        let result: Option<DbFile> = diesel::sql_query(
+            "SELECT hash, data, size FROM files WHERE hash = $1"
+        )
+        .bind::<Text, _>(&hash_str)
+        .get_result(&mut conn)
+        .await
+        .optional()?;
 
-        match db_file {
-            Some(f) => File::try_from(f).map(Some),
-            None => return Ok(None),
+        match result {
+            Some(db) => {
+                let hash = Sha256Hash::from_str(&db.hash)?;
+                Ok(Some(File { 
+                    hash, 
+                    bytes: db.data, 
+                    size: db.size 
+                }))
+            }
+            None => Ok(None),
         }
     }
 
     async fn insert(&self, file: File) -> Result<(), anyhow::Error> {
-        let db_file: DbFile = file.into();
+        let hash_str = file.hash.to_string();
+        let mut conn = self.get_connection().await?;
 
-        self.pool
-            .get()
-            .await?
-            .execute(
-                "INSERT INTO files (hash, data, size) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-                &[&db_file.hash, &db_file.bytes, &db_file.size],
-            )
-            .await?;
+        diesel::sql_query(
+            "INSERT INTO files (hash, data, size) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING"
+        )
+        .bind::<Text, _>(&hash_str)
+        .bind::<Bytea, _>(&file.bytes)
+        .bind::<Integer, _>(&file.size)
+        .execute(&mut conn)
+        .await?;
 
         Ok(())
-    }
-}
-
-fn row_to_db_file(row: &Row) -> DbFile {
-    let hash: String = row.get(0);
-    let data: Vec<u8> = row.get(1);
-    let size: i32 = row.get(2);
-
-    DbFile {
-        hash,
-        bytes: data,
-        size,
-    }
-}
-
-#[derive(Debug)]
-pub struct DbFile {
-    pub hash: String,
-    pub bytes: Vec<u8>,
-    pub size: i32,
-}
-
-impl TryFrom<DbFile> for File {
-    type Error = anyhow::Error;
-
-    fn try_from(value: DbFile) -> Result<Self, Self::Error> {
-        let hash = Sha256Hash::from_str(&value.hash)?;
-        Ok(Self {
-            hash,
-            bytes: value.bytes,
-            size: value.size,
-        })
-    }
-}
-
-impl From<File> for DbFile {
-    fn from(value: File) -> Self {
-        Self {
-            hash: value.hash.to_string(),
-            bytes: value.bytes,
-            size: value.size,
-        }
     }
 }

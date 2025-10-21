@@ -1,11 +1,54 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use tokio_postgres::Row;
+use diesel::prelude::*;
+use diesel::sql_types::{BigInt, Bool, Text, Timestamptz};
+use diesel_async::{AsyncConnection, RunQueryDsl};
+use diesel_async::scoped_futures::ScopedFutureExt;
 
 use crate::{
     db::PostgresStore,
     notification::{Challenge, EmailConfirmation, EmailPreferences, PreferencesFlags},
 };
+
+#[derive(QueryableByName, Debug)]
+struct DbChallenge {
+    #[diesel(sql_type = Text)]
+    npub: String,
+    #[diesel(sql_type = Text)]
+    challenge: String,
+    #[diesel(sql_type = Timestamptz)]
+    created_at: DateTime<Utc>,
+}
+
+#[derive(QueryableByName, Debug)]
+struct DbEmailConfirmation {
+    #[diesel(sql_type = Text)]
+    npub: String,
+    #[diesel(sql_type = Text)]
+    email: String,
+    #[diesel(sql_type = Bool)]
+    confirmed: bool,
+    #[diesel(sql_type = Timestamptz)]
+    sent_at: DateTime<Utc>,
+}
+
+#[derive(QueryableByName, Debug)]
+struct DbEmailPreferences {
+    #[diesel(sql_type = Text)]
+    npub: String,
+    #[diesel(sql_type = Bool)]
+    enabled: bool,
+    #[diesel(sql_type = Text)]
+    token: String,
+    #[diesel(sql_type = Text)]
+    email: String,
+    #[diesel(sql_type = Bool)]
+    email_confirmed: bool,
+    #[diesel(sql_type = Text)]
+    ebill_url: String,
+    #[diesel(sql_type = BigInt)]
+    flags: i64,
+}
 
 #[async_trait]
 pub trait NotificationStoreApi: Send + Sync {
@@ -57,41 +100,50 @@ impl NotificationStoreApi for PostgresStore {
         npub: String,
         challenge: String,
     ) -> Result<(), anyhow::Error> {
-        self.pool
-            .get()
-            .await?
-            .execute(
-                "INSERT INTO notif_challenges (npub, challenge) VALUES ($1, $2) ON CONFLICT (npub) DO UPDATE SET challenge = $2, created_at = (NOW() AT TIME ZONE 'UTC')",
-                &[&npub, &challenge],
-            )
-            .await?;
+        let mut conn = self.get_connection().await?;
+        
+        diesel::sql_query(
+            "INSERT INTO notif_challenges (npub, challenge) VALUES ($1, $2) ON CONFLICT (npub) DO UPDATE SET challenge = $2, created_at = (NOW() AT TIME ZONE 'UTC')"
+        )
+        .bind::<Text, _>(&npub)
+        .bind::<Text, _>(&challenge)
+        .execute(&mut conn)
+        .await?;
+        
         Ok(())
     }
 
     async fn get_challenge_for_npub(&self, npub: &str) -> Result<Option<Challenge>, anyhow::Error> {
-        let row = self
-            .pool
-            .get()
-            .await?
-            .query_opt(
-                "SELECT npub, challenge, created_at FROM notif_challenges WHERE npub = $1",
-                &[&npub.to_string()],
-            )
-            .await?;
-        let db_challenge = row.map(|r| row_to_db_challenge(&r));
+        let mut conn = self.get_connection().await?;
+        
+        let result: Option<DbChallenge> = diesel::sql_query(
+            "SELECT npub, challenge, created_at FROM notif_challenges WHERE npub = $1"
+        )
+        .bind::<Text, _>(npub)
+        .get_result(&mut conn)
+        .await
+        .optional()?;
 
-        match db_challenge {
-            Some(c) => Challenge::try_from(c).map(Some),
-            None => return Ok(None),
+        match result {
+            Some(db) => {
+                Ok(Some(Challenge {
+                    npub: db.npub,
+                    challenge: db.challenge,
+                    created_at: db.created_at,
+                }))
+            }
+            None => Ok(None),
         }
     }
 
     async fn remove_challenge_for_npub(&self, npub: &str) -> Result<(), anyhow::Error> {
-        self.pool
-            .get()
-            .await?
-            .execute("DELETE FROM notif_challenges WHERE npub = $1", &[&npub])
+        let mut conn = self.get_connection().await?;
+        
+        diesel::sql_query("DELETE FROM notif_challenges WHERE npub = $1")
+            .bind::<Text, _>(npub)
+            .execute(&mut conn)
             .await?;
+        
         Ok(())
     }
 
@@ -104,20 +156,37 @@ impl NotificationStoreApi for PostgresStore {
         ebill_url: &str,
         flags: PreferencesFlags,
     ) -> Result<(), anyhow::Error> {
-        let mut con = self.pool.get().await?;
-        let tx = con.transaction().await?;
-        tx.execute(
-                "INSERT INTO notif_email_verification (npub, email, token) VALUES ($1, $2, $3) ON CONFLICT (npub) DO UPDATE SET email = $2, token = $3, confirmed = false, sent_at = (NOW() AT TIME ZONE 'UTC')",
-                &[&npub, &email, &confirmation_token],
-            )
-            .await?;
+        let mut conn = self.get_connection().await?;
+        let flags_i64 = flags.bits();
+        
+        conn.transaction::<_, anyhow::Error, _>(|conn| {
+            async move {
+                diesel::sql_query(
+                    "INSERT INTO notif_email_verification (npub, email, token) VALUES ($1, $2, $3) ON CONFLICT (npub) DO UPDATE SET email = $2, token = $3, confirmed = false, sent_at = (NOW() AT TIME ZONE 'UTC')"
+                )
+                .bind::<Text, _>(npub)
+                .bind::<Text, _>(email)
+                .bind::<Text, _>(confirmation_token)
+                .execute(conn)
+                .await?;
 
-        tx.execute(
-                "INSERT INTO notif_email_preferences (npub, email, token, ebill_url, flags) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (npub) DO UPDATE SET email = $2, token = $3, ebill_url = $4, flags = $5, enabled = false, email_confirmed = false",
-                &[&npub, &email, &preferences_token, &ebill_url, &{ flags.bits() }],
-            )
-            .await?;
-        tx.commit().await?;
+                diesel::sql_query(
+                    "INSERT INTO notif_email_preferences (npub, email, token, ebill_url, flags) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (npub) DO UPDATE SET email = $2, token = $3, ebill_url = $4, flags = $5, enabled = false, email_confirmed = false"
+                )
+                .bind::<Text, _>(npub)
+                .bind::<Text, _>(email)
+                .bind::<Text, _>(preferences_token)
+                .bind::<Text, _>(ebill_url)
+                .bind::<BigInt, _>(flags_i64)
+                .execute(conn)
+                .await?;
+                
+                Ok(())
+            }
+            .scope_boxed()
+        })
+        .await?;
+        
         Ok(())
     }
 
@@ -125,20 +194,26 @@ impl NotificationStoreApi for PostgresStore {
         &self,
         token: &str,
     ) -> Result<Option<EmailConfirmation>, anyhow::Error> {
-        let row = self
-            .pool
-            .get()
-            .await?
-            .query_opt(
-                "SELECT npub, email, confirmed, sent_at FROM notif_email_verification WHERE token = $1",
-                &[&token.to_string()],
-            )
-            .await?;
-        let db_email_confirmation = row.map(|r| row_to_db_email_confirmation(&r));
+        let mut conn = self.get_connection().await?;
+        
+        let result: Option<DbEmailConfirmation> = diesel::sql_query(
+            "SELECT npub, email, confirmed, sent_at FROM notif_email_verification WHERE token = $1"
+        )
+        .bind::<Text, _>(token)
+        .get_result(&mut conn)
+        .await
+        .optional()?;
 
-        match db_email_confirmation {
-            Some(c) => EmailConfirmation::try_from(c).map(Some),
-            None => return Ok(None),
+        match result {
+            Some(db) => {
+                Ok(Some(EmailConfirmation {
+                    npub: db.npub,
+                    email: db.email,
+                    confirmed: db.confirmed,
+                    sent_at: db.sent_at,
+                }))
+            }
+            None => Ok(None),
         }
     }
 
@@ -146,21 +221,28 @@ impl NotificationStoreApi for PostgresStore {
         &self,
         npub: &str,
     ) -> Result<(), anyhow::Error> {
-        let mut con = self.pool.get().await?;
-        let tx = con.transaction().await?;
-        tx.execute(
-            "DELETE FROM notif_email_verification WHERE npub = $1",
-            &[&npub],
-        )
+        let mut conn = self.get_connection().await?;
+        
+        conn.transaction::<_, anyhow::Error, _>(|conn| {
+            async move {
+                diesel::sql_query("DELETE FROM notif_email_verification WHERE npub = $1")
+                    .bind::<Text, _>(npub)
+                    .execute(conn)
+                    .await?;
+
+                diesel::sql_query(
+                    "UPDATE notif_email_preferences SET email_confirmed = true, enabled = true WHERE npub = $1"
+                )
+                .bind::<Text, _>(npub)
+                .execute(conn)
+                .await?;
+                
+                Ok(())
+            }
+            .scope_boxed()
+        })
         .await?;
-
-        tx.execute(
-            "UPDATE notif_email_preferences SET email_confirmed = true, enabled = true WHERE npub = $1",
-            &[&npub],
-        )
-            .await?;
-
-        tx.commit().await?;
+        
         Ok(())
     }
 
@@ -168,20 +250,29 @@ impl NotificationStoreApi for PostgresStore {
         &self,
         npub: &str,
     ) -> Result<Option<EmailPreferences>, anyhow::Error> {
-        let row = self
-            .pool
-            .get()
-            .await?
-            .query_opt(
-                "SELECT npub, enabled, token, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE npub = $1",
-                &[&npub.to_string()],
-            )
-            .await?;
-        let db_email_preferences = row.map(|r| row_to_db_email_preferences(&r));
+        let mut conn = self.get_connection().await?;
+        
+        let result: Option<DbEmailPreferences> = diesel::sql_query(
+            "SELECT npub, enabled, token, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE npub = $1"
+        )
+        .bind::<Text, _>(npub)
+        .get_result(&mut conn)
+        .await
+        .optional()?;
 
-        match db_email_preferences {
-            Some(c) => EmailPreferences::try_from(c).map(Some),
-            None => return Ok(None),
+        match result {
+            Some(db) => {
+                Ok(Some(EmailPreferences {
+                    npub: db.npub,
+                    enabled: db.enabled,
+                    token: db.token,
+                    email: db.email,
+                    email_confirmed: db.email_confirmed,
+                    ebill_url: url::Url::parse(&db.ebill_url)?,
+                    flags: PreferencesFlags::from_bits_truncate(db.flags),
+                }))
+            }
+            None => Ok(None),
         }
     }
 
@@ -189,20 +280,29 @@ impl NotificationStoreApi for PostgresStore {
         &self,
         token: &str,
     ) -> Result<Option<EmailPreferences>, anyhow::Error> {
-        let row = self
-            .pool
-            .get()
-            .await?
-            .query_opt(
-                "SELECT npub, enabled, token, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE token = $1",
-                &[&token.to_string()],
-            )
-            .await?;
-        let db_email_preferences = row.map(|r| row_to_db_email_preferences(&r));
+        let mut conn = self.get_connection().await?;
+        
+        let result: Option<DbEmailPreferences> = diesel::sql_query(
+            "SELECT npub, enabled, token, email, email_confirmed, ebill_url, flags FROM notif_email_preferences WHERE token = $1"
+        )
+        .bind::<Text, _>(token)
+        .get_result(&mut conn)
+        .await
+        .optional()?;
 
-        match db_email_preferences {
-            Some(c) => EmailPreferences::try_from(c).map(Some),
-            None => return Ok(None),
+        match result {
+            Some(db) => {
+                Ok(Some(EmailPreferences {
+                    npub: db.npub,
+                    enabled: db.enabled,
+                    token: db.token,
+                    email: db.email,
+                    email_confirmed: db.email_confirmed,
+                    ebill_url: url::Url::parse(&db.ebill_url)?,
+                    flags: PreferencesFlags::from_bits_truncate(db.flags),
+                }))
+            }
+            None => Ok(None),
         }
     }
 
@@ -212,127 +312,18 @@ impl NotificationStoreApi for PostgresStore {
         enabled: bool,
         flags: PreferencesFlags,
     ) -> Result<(), anyhow::Error> {
-        self.pool
-            .get()
-            .await?
-            .execute(
-                "UPDATE notif_email_preferences SET enabled = $2, flags = $3 WHERE token = $1",
-                &[&token, &enabled, &{ flags.bits() }],
-            )
-            .await?;
+        let mut conn = self.get_connection().await?;
+        let flags_i64 = flags.bits();
+        
+        diesel::sql_query(
+            "UPDATE notif_email_preferences SET enabled = $2, flags = $3 WHERE token = $1"
+        )
+        .bind::<Text, _>(token)
+        .bind::<Bool, _>(enabled)
+        .bind::<BigInt, _>(flags_i64)
+        .execute(&mut conn)
+        .await?;
+        
         Ok(())
-    }
-}
-
-fn row_to_db_challenge(row: &Row) -> DbChallenge {
-    let npub: String = row.get(0);
-    let challenge: String = row.get(1);
-    let created_at: DateTime<Utc> = row.get(2);
-
-    DbChallenge {
-        npub,
-        challenge,
-        created_at,
-    }
-}
-
-#[derive(Debug)]
-pub struct DbChallenge {
-    pub npub: String,
-    pub challenge: String,
-    pub created_at: DateTime<Utc>,
-}
-
-impl TryFrom<DbChallenge> for Challenge {
-    type Error = anyhow::Error;
-
-    fn try_from(value: DbChallenge) -> Result<Self, Self::Error> {
-        Ok(Self {
-            npub: value.npub,
-            challenge: value.challenge,
-            created_at: value.created_at,
-        })
-    }
-}
-
-fn row_to_db_email_confirmation(row: &Row) -> DbEmailConfirmation {
-    let npub: String = row.get(0);
-    let email: String = row.get(1);
-    let confirmed: bool = row.get(2);
-    let sent_at: DateTime<Utc> = row.get(3);
-
-    DbEmailConfirmation {
-        npub,
-        email,
-        confirmed,
-        sent_at,
-    }
-}
-
-#[derive(Debug)]
-pub struct DbEmailConfirmation {
-    pub npub: String,
-    pub email: String,
-    pub confirmed: bool,
-    pub sent_at: DateTime<Utc>,
-}
-
-impl TryFrom<DbEmailConfirmation> for EmailConfirmation {
-    type Error = anyhow::Error;
-
-    fn try_from(value: DbEmailConfirmation) -> Result<Self, Self::Error> {
-        Ok(Self {
-            npub: value.npub,
-            email: value.email,
-            confirmed: value.confirmed,
-            sent_at: value.sent_at,
-        })
-    }
-}
-
-fn row_to_db_email_preferences(row: &Row) -> DbEmailPreferences {
-    let npub: String = row.get(0);
-    let enabled: bool = row.get(1);
-    let token: String = row.get(2);
-    let email: String = row.get(3);
-    let email_confirmed: bool = row.get(4);
-    let ebill_url: String = row.get(5);
-    let flags: i64 = row.get(6);
-
-    DbEmailPreferences {
-        npub,
-        enabled,
-        token,
-        email,
-        email_confirmed,
-        ebill_url,
-        flags,
-    }
-}
-
-#[derive(Debug)]
-pub struct DbEmailPreferences {
-    pub npub: String,
-    pub enabled: bool,
-    pub token: String,
-    pub email: String,
-    pub email_confirmed: bool,
-    pub ebill_url: String,
-    pub flags: i64,
-}
-
-impl TryFrom<DbEmailPreferences> for EmailPreferences {
-    type Error = anyhow::Error;
-
-    fn try_from(value: DbEmailPreferences) -> Result<Self, Self::Error> {
-        Ok(Self {
-            npub: value.npub,
-            enabled: value.enabled,
-            token: value.token,
-            email: value.email,
-            email_confirmed: value.email_confirmed,
-            ebill_url: url::Url::parse(&value.ebill_url)?,
-            flags: PreferencesFlags::from_bits_truncate(value.flags),
-        })
     }
 }

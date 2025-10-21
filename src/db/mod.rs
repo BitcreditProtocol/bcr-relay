@@ -1,46 +1,56 @@
-use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
-use tokio_postgres::NoTls;
+use diesel_async::{AsyncPgConnection, pooled_connection::AsyncDieselConnectionManager, RunQueryDsl};
+use deadpool::managed::Pool;
 
 pub struct PostgresStore {
-    pub pool: Pool,
+    pool: Pool<AsyncDieselConnectionManager<AsyncPgConnection>>,
 }
 
 impl PostgresStore {
-    pub async fn new(conn_str: &str) -> Result<Self, anyhow::Error> {
-        let cfg: tokio_postgres::Config = conn_str.parse()?;
-        let mgr_config = ManagerConfig {
-            recycling_method: RecyclingMethod::Fast,
-        };
-        let pool = Pool::builder(Manager::from_config(cfg, NoTls, mgr_config))
-            .max_size(16)
-            .build()?;
+    pub fn new(pool: Pool<AsyncDieselConnectionManager<AsyncPgConnection>>) -> Self {
+        Self { pool }
+    }
 
-        Ok(Self { pool })
+    pub async fn get_connection(
+        &self,
+    ) -> Result<
+        deadpool::managed::Object<AsyncDieselConnectionManager<AsyncPgConnection>>,
+        anyhow::Error,
+    > {
+        Ok(self.pool.get().await?)
     }
 
     /// Creates the tables, if they don't exist yet
     pub async fn init(&self) -> Result<(), anyhow::Error> {
+        let mut conn = self.get_connection().await?;
+        
         // File Store
-        let qry = r#"
+        diesel::sql_query(
+            r#"
             CREATE TABLE IF NOT EXISTS files (
                 hash CHAR(64) PRIMARY KEY,
                 data BYTEA NOT NULL,
                 size INTEGER NOT NULL
             )
-        "#;
-        self.pool.get().await?.execute(qry, &[]).await?;
+        "#,
+        )
+        .execute(&mut conn)
+        .await?;
 
         // Notification Store
-        let qry = r#"
+        diesel::sql_query(
+            r#"
             CREATE TABLE IF NOT EXISTS notif_challenges (
                 npub TEXT PRIMARY KEY,
                 challenge TEXT NOT NULL,
                 created_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'UTC')
             )
-        "#;
-        self.pool.get().await?.execute(qry, &[]).await?;
+        "#,
+        )
+        .execute(&mut conn)
+        .await?;
 
-        let qry = r#"
+        diesel::sql_query(
+            r#"
             CREATE TABLE IF NOT EXISTS notif_email_verification (
                 npub TEXT PRIMARY KEY,
                 email TEXT NOT NULL,
@@ -48,10 +58,13 @@ impl PostgresStore {
                 token TEXT,
                 sent_at TIMESTAMPTZ DEFAULT (NOW() AT TIME ZONE 'UTC')
             )
-        "#;
-        self.pool.get().await?.execute(qry, &[]).await?;
+        "#,
+        )
+        .execute(&mut conn)
+        .await?;
 
-        let qry = r#"
+        diesel::sql_query(
+            r#"
             CREATE TABLE IF NOT EXISTS notif_email_preferences (
                 npub TEXT PRIMARY KEY,
                 enabled BOOLEAN DEFAULT FALSE,
@@ -61,8 +74,11 @@ impl PostgresStore {
                 ebill_url TEXT NOT NULL,
                 flags BIGINT NOT NULL
             )
-        "#;
-        self.pool.get().await?.execute(qry, &[]).await?;
+        "#,
+        )
+        .execute(&mut conn)
+        .await?;
+
         Ok(())
     }
 }
