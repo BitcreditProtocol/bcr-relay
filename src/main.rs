@@ -8,6 +8,10 @@ mod util;
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+use deadpool_postgres::Manager;
+use deadpool_postgres::ManagerConfig;
+use deadpool_postgres::Pool;
+use deadpool_postgres::RecyclingMethod;
 use hickory_resolver::Resolver;
 use hickory_resolver::config::*;
 use hickory_resolver::name_server::TokioConnectionProvider;
@@ -30,6 +34,7 @@ use relay::RelayConfig;
 use reqwest::redirect;
 use serde::Serialize;
 use tokio::sync::Mutex;
+use tokio_postgres::NoTls;
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
@@ -176,7 +181,8 @@ struct AppState {
 
 impl AppState {
     pub async fn new(config: &RelayConfig) -> Result<Self> {
-        let db = db::PostgresStore::new(&config.db_connection_string()).await?;
+        let pool = postgres_connection_pool(&config.db_connection_string()).await?;
+        let db = db::PostgresStore::new(pool.clone());
         db.init().await?;
         let store = Arc::new(db);
 
@@ -198,7 +204,7 @@ impl AppState {
                 .build()?,
         };
         Ok(Self {
-            relay: relay::init(config).await?,
+            relay: relay::init(config, pool).await?,
             cfg: AppConfig {
                 host_url: config.host_url.clone(),
                 email_from_address: config.email_from_address.clone(),
@@ -210,4 +216,14 @@ impl AppState {
             proxy_client,
         })
     }
+}
+
+async fn postgres_connection_pool(db_url: &str) -> Result<Pool> {
+    let cfg: tokio_postgres::Config = db_url.parse()?;
+    let mgr_config = ManagerConfig {
+        recycling_method: RecyclingMethod::Fast,
+    };
+    Ok(Pool::builder(Manager::from_config(cfg, NoTls, mgr_config))
+        .max_size(16)
+        .build()?)
 }
