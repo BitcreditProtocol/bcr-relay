@@ -60,7 +60,7 @@ impl SlidingWindow {
         }
     }
 
-    pub fn should_prune(&self, now: DateTime<Utc>) -> bool {
+    pub fn retain(&self, now: DateTime<Utc>) -> bool {
         now - self.last_seen <= MAX_IDLE
     }
 }
@@ -144,9 +144,9 @@ impl RateLimiter {
         self.last_prune = now;
 
         // only keep recent entries
-        self.by_ip.retain(|_, win| win.should_prune(now));
-        self.by_email.retain(|_, win| win.should_prune(now));
-        self.by_npub_sender.retain(|_, win| win.should_prune(now));
+        self.by_ip.retain(|_, win| win.retain(now));
+        self.by_email.retain(|_, win| win.retain(now));
+        self.by_npub_sender.retain(|_, win| win.retain(now));
     }
 }
 

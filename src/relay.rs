@@ -184,7 +184,7 @@ impl NostrRateLimiter {
         self.last_prune = now;
 
         // only keep recent entries
-        self.keys.retain(|_, win| win.should_prune(now));
+        self.keys.retain(|_, win| win.retain(now));
     }
 }
 
