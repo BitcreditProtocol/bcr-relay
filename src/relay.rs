@@ -87,10 +87,10 @@ pub struct RelayConfig {
     pub email_api_secret_key: String,
     #[arg(default_value_t = Url::parse("https://api.mailjet.com").unwrap(), long, env = "EMAIL_URL")]
     pub email_url: Url,
-    #[arg(default_value_t = 6, long, env = "BLOCKCHAIN_RATE_LIMIT")]
+    #[arg(default_value_t = 12, long, env = "BLOCKCHAIN_RATE_LIMIT")]
     pub chain_rate_limit: usize,
     #[arg(
-        default_value_t = 60,
+        default_value_t = 120,
         long,
         env = "BLOCKCHAIN_RATE_LIMIT_WINDOW_SECONDS"
     )]
