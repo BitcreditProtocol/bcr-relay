@@ -45,7 +45,7 @@ fn auth_mode() -> RelayBuilderNip42 {
     }
 }
 
-fn block_rate_limiter(config: &RelayConfig) -> BlockRateLimiter {
+fn block_rate_limiter(config: &RelayConfig) -> BlockRateLimiter<NostrRateLimiter> {
     let limiter = Arc::new(Mutex::new(NostrRateLimiter::new(
         config.chain_rate_limit,
         Duration::seconds(config.chain_rate_limit_window as i64),
@@ -112,18 +112,18 @@ impl RelayConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct BlockRateLimiter {
-    limiter: Arc<Mutex<dyn NostrRateLimiterApi>>,
+pub struct BlockRateLimiter<T: NostrRateLimiterApi> {
+    limiter: Arc<Mutex<T>>,
     chains: HashSet<String>,
 }
 
-impl BlockRateLimiter {
-    pub fn new(limiter: Arc<Mutex<dyn NostrRateLimiterApi>>, chains: HashSet<String>) -> Self {
+impl<T: NostrRateLimiterApi> BlockRateLimiter<T> {
+    pub fn new(limiter: Arc<Mutex<T>>, chains: HashSet<String>) -> Self {
         Self { chains, limiter }
     }
 }
 
-impl WritePolicy for BlockRateLimiter {
+impl<T: NostrRateLimiterApi> WritePolicy for BlockRateLimiter<T> {
     fn admit_event<'a>(
         &'a self,
         event: &'a Event,
