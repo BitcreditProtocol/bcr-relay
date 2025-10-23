@@ -8,7 +8,7 @@ license = "MIT"
 nostr-sdk = { version = "0.43", features = ["nip59"] }
 nostr = "0.43"
 nostr-relay-builder = "0.43"
-nostr-postgres-db = { git = "https://github.com/BitcreditProtocol/nostr-postgres-db.git", rev = "2cb4c64" }
+nostr-postgres-db = { git = "https://github.com/BitcreditProtocol/nostr-postgres-db.git", rev = "e36dc9e" }
 tokio = "1.45.1"
 axum = { version = "0.8.3", features = ["ws", "tokio"] }
 axum-extra = { version = "0.10", features = ["form"] }

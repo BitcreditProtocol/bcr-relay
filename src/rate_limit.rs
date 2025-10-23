@@ -21,10 +21,10 @@ const NPUB_LIMIT: usize = 100;
 const NPUB_WINDOW: Duration = Duration::seconds(10 * 60); // 10 minutes
 
 const MAX_IDLE: Duration = Duration::seconds(24 * 3600); // remove after 24h idle
-const PRUNE_INTERVAL: Duration = Duration::seconds(10 * 60); // check every 10 minutes
+pub const PRUNE_INTERVAL: Duration = Duration::seconds(10 * 60); // check every 10 minutes
 
 #[derive(Debug)]
-struct SlidingWindow {
+pub struct SlidingWindow {
     hits: VecDeque<DateTime<Utc>>,
     window: Duration,
     limit: usize,
@@ -32,7 +32,7 @@ struct SlidingWindow {
 }
 
 impl SlidingWindow {
-    fn new(limit: usize, window: Duration) -> Self {
+    pub fn new(limit: usize, window: Duration) -> Self {
         Self {
             hits: VecDeque::with_capacity(limit),
             window,
@@ -41,7 +41,7 @@ impl SlidingWindow {
         }
     }
 
-    fn allow(&mut self, now: DateTime<Utc>) -> bool {
+    pub fn allow(&mut self, now: DateTime<Utc>) -> bool {
         // Remove expired hits
         while let Some(&ts) = self.hits.front() {
             if now - ts > self.window {
@@ -58,6 +58,10 @@ impl SlidingWindow {
         } else {
             false
         }
+    }
+
+    pub fn should_prune(&self, now: DateTime<Utc>) -> bool {
+        now - self.last_seen <= MAX_IDLE
     }
 }
 
@@ -140,11 +144,9 @@ impl RateLimiter {
         self.last_prune = now;
 
         // only keep recent entries
-        self.by_ip.retain(|_, win| now - win.last_seen <= MAX_IDLE);
-        self.by_email
-            .retain(|_, win| now - win.last_seen <= MAX_IDLE);
-        self.by_npub_sender
-            .retain(|_, win| now - win.last_seen <= MAX_IDLE);
+        self.by_ip.retain(|_, win| win.should_prune(now));
+        self.by_email.retain(|_, win| win.should_prune(now));
+        self.by_npub_sender.retain(|_, win| win.should_prune(now));
     }
 }
 
