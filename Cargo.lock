@@ -1519,7 +1519,7 @@ dependencies = [
 [[package]]
 name = "nostr-postgres-db"
 version = "0.1.0"
-source = "git+https://github.com/BitcreditProtocol/nostr-postgres-db.git?rev=2cb4c64#2cb4c64e124e7d51382f235080c34f2b7d68cf3a"
+source = "git+https://github.com/BitcreditProtocol/nostr-postgres-db.git?rev=e36dc9e#e36dc9ef90dd764370338df2bb4b99c1166d94ad"
 dependencies = [
  "deadpool",
  "deadpool-postgres",
