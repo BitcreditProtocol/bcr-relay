@@ -5,13 +5,13 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-nostr-sdk = { version = "0.43", features = ["nip59"] }
-nostr = "0.43"
-nostr-relay-builder = "0.43"
-nostr-postgres-db = { git = "https://github.com/BitcreditProtocol/nostr-postgres-db.git", rev = "e36dc9e" }
+nostr-sdk = { version = "0.44", features = ["nip59"] }
+nostr = "0.44"
+nostr-relay-builder = "0.44"
+nostr-postgres-db = { git = "https://github.com/BitcreditProtocol/nostr-postgres-db.git", rev = "a8dbc8e" }
 tokio = "1.45.1"
 axum = { version = "0.8.3", features = ["ws", "tokio"] }
-axum-extra = { version = "0.10", features = ["form"] }
+axum-extra = { version = "0.12", features = ["form"] }
 axum-raw-websocket = "0.8"
 anyhow = "1"
 tracing = "0.1.41"
