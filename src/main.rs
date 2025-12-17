@@ -166,6 +166,7 @@ async fn handle_404(uri: Uri) -> impl IntoResponse {
 struct AppConfig {
     pub host_url: Url,
     pub email_from_address: String,
+    pub max_file_size_bytes: usize,
 }
 
 #[derive(Clone)]
@@ -208,6 +209,7 @@ impl AppState {
             cfg: AppConfig {
                 host_url: config.host_url.clone(),
                 email_from_address: config.email_from_address.clone(),
+                max_file_size_bytes: config.max_file_size_bytes,
             },
             file_store: store.clone(),
             notification_store: store,

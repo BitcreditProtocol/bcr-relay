@@ -21,7 +21,6 @@ use tracing::{error, info};
 
 use crate::AppState;
 
-const MAX_FILE_SIZE_BYTES: usize = 1_000_000; // ~1 MB
 const ENCRYPTION_PUB_KEY_BYTE_LEN: usize = 65; // we use uncompressed keys
 
 /// For now, the only parts of the API we implement are
@@ -65,10 +64,10 @@ pub async fn handle_upload(State(state): State<AppState>, body: Bytes) -> impl I
 
     info!("Upload File called for {} bytes", size);
     // check size
-    if size > MAX_FILE_SIZE_BYTES {
+    if size > state.cfg.max_file_size_bytes {
         return (
             StatusCode::PAYLOAD_TOO_LARGE,
-            format!("File too big - max {MAX_FILE_SIZE_BYTES} bytes"),
+            format!("File too big - max {} bytes", state.cfg.max_file_size_bytes),
         )
             .into_response();
     }

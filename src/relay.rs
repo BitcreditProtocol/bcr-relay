@@ -27,7 +27,9 @@ use crate::rate_limit::{PRUNE_INTERVAL, SlidingWindow};
 const BCR_NOSTR_CHAIN_PREFIX: &str = "bitcredit";
 
 pub async fn init(config: &RelayConfig, pool: Pool) -> Result<LocalRelay> {
-    Ok(LocalRelay::new(builder(config, pool).await?).await?)
+    let relay = LocalRelay::new(builder(config, pool).await?);
+    relay.run().await?;
+    Ok(relay)
 }
 
 async fn builder(config: &RelayConfig, pool: Pool) -> Result<RelayBuilder> {
@@ -95,6 +97,8 @@ pub struct RelayConfig {
         env = "BLOCKCHAIN_RATE_LIMIT_WINDOW_SECONDS"
     )]
     pub chain_rate_limit_window: usize,
+    #[arg(default_value_t = 10_000_000, long, env = "MAX_FILE_SIZE_BYTES")]
+    pub max_file_size_bytes: usize,
 }
 
 impl RelayConfig {
