@@ -8,6 +8,7 @@ mod util;
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+use axum::extract::DefaultBodyLimit;
 use deadpool_postgres::Manager;
 use deadpool_postgres::ManagerConfig;
 use deadpool_postgres::Pool;
@@ -72,7 +73,10 @@ async fn main() -> Result<()> {
         .route("/mirror", put(blossom::handle_mirror))
         .route("/media", any(blossom::handle_media))
         .route("/report", any(blossom::handle_report))
-        .route("/upload", put(blossom::handle_upload))
+        .route(
+            "/upload",
+            put(blossom::handle_upload).layer(DefaultBodyLimit::max(config.max_file_size_bytes)),
+        )
         .route("/upload", head(blossom::handle_upload_head))
         .route("/{hash}", get(blossom::handle_get_file))
         .route("/{hash}", head(blossom::handle_get_file_head))
