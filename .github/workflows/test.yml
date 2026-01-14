@@ -60,13 +60,9 @@ jobs:
           LLVM_PROFILE_FILE: "target/coverage/%p-%m.profraw"
           RUSTFLAGS: "-Cinstrument-coverage"
 
-      - name: Create coverage report
-        run: grcov --source-dir . --binary-path target/debug --branch --excl-start 'mod tests \{' --ignore 'tests/*' --keep-only "crates/*"  -o lcov.info -t lcov `find crates -name coverage`
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
         with:
-          files: lcov.info
-          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: BitcreditProtocol/bcr-relay
