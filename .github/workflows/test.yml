@@ -43,7 +43,7 @@ jobs:
           RUSTFLAGS: "-Cinstrument-coverage"
 
       - name: Create coverage report
-        run: grcov --source-dir . --binary-path target/debug --branch --keep-only "crates/*"  -o lcov.info -t lcov `find crates -name coverage`
+        run: grcov --source-dir . --binary-path target/debug --branch --keep-only "src/*"  -o lcov.info -t lcov `find crates -name coverage`
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
