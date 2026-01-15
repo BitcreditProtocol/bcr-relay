@@ -4,13 +4,6 @@ on:
   push:
     branches: [ "**" ]
 
-permissions:
-  contents: read
-  security-events: write
-
-env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -21,19 +14,7 @@ jobs:
           - stable
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Free up disk space
-        run: |
-          echo "Before cleanup:"
-          df -h
-          docker system prune -a -f
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo apt-get clean
-          sudo apt-get autoremove -y
-          echo "After cleanup:"
-          df -h
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
 
       - name: Switch rust version
         run: rustup default stable
@@ -44,24 +25,36 @@ jobs:
       - name: Install llvm-tools-preview
         run: rustup component add llvm-tools-preview
 
+      - name: Install grcov
+        run: cargo install grcov
+
       - name: Activate cache
-        uses: Swatinem/rust-cache@v2.8.0
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           prefix-key: "bcr-relay"
 
-      - name: Install grcov
-        uses: taiki-e/install-action@v2
-        with:
-          tool: grcov
-
-      - name: run tests
-        run: cargo test --workspace --verbose
+      - name: Run tests
+        run: cargo test --verbose
         env:
-          LLVM_PROFILE_FILE: "target/coverage/%p-%m.profraw"
+          LLVM_PROFILE_FILE: "target/coverage/prof/%p-%m.profraw"
           RUSTFLAGS: "-Cinstrument-coverage"
 
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5
+      - name: Create coverage report
+        run: |
+          grcov \
+            --source-dir . \
+            --binary-path target/debug \
+            --branch \
+            --excl-start 'mod tests \{' \
+            --ignore 'tests/*' \
+            -t lcov \
+            -o lcov.info \
+            target/coverage/prof
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          slug: BitcreditProtocol/bcr-relay
+          files: lcov.info
+          fail_ci_if_error: false
