@@ -4,9 +4,6 @@ on:
   push:
     branches: [ "**" ]
 
-env:
-  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -36,10 +33,10 @@ jobs:
         with:
           prefix-key: "bcr-relay"
 
-      - name: run tests
+      - name: Run tests
         run: cargo test --verbose
         env:
-          LLVM_PROFILE_FILE: "target/coverage/%p-%m.profraw"
+          LLVM_PROFILE_FILE: "target/coverage/prof/%p-%m.profraw"
           RUSTFLAGS: "-Cinstrument-coverage"
 
       - name: Create coverage report
