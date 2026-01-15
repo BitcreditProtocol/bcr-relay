@@ -60,7 +60,6 @@ jobs:
           LLVM_PROFILE_FILE: "target/coverage/%p-%m.profraw"
           RUSTFLAGS: "-Cinstrument-coverage"
 
-        
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
         with:
