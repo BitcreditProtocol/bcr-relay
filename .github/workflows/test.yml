@@ -37,7 +37,7 @@ jobs:
           prefix-key: "bcr-relay"
 
       - name: run tests
-        run: cargo test --workspace --verbose
+        run: cargo test --verbose
         env:
           LLVM_PROFILE_FILE: "target/coverage/%p-%m.profraw"
           RUSTFLAGS: "-Cinstrument-coverage"
