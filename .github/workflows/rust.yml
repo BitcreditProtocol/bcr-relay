@@ -42,7 +42,7 @@ jobs:
         run: cargo install cargo-deny clippy-sarif sarif-fmt
 
       - name: Activate cache
-        uses: Swatinem/rust-cache@v2.8.0
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           prefix-key: "bcr-relay"
 
