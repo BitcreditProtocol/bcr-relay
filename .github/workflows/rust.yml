@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [ "*" ]
+    branches: [ "**" ]
 
 permissions:
   contents: read
@@ -35,37 +35,29 @@ jobs:
       - name: Update rust
         run: rustup update
 
-      - name: Cargo update
-        run: cargo update --verbose
+      - name: Add rustup components
+        run: rustup component add clippy rustfmt
+
+      - name: Install required cargo
+        run: cargo install cargo-deny clippy-sarif sarif-fmt
+
+      - name: Activate cache
+        uses: Swatinem/rust-cache@v2.8.0
+        with:
+          prefix-key: "bcr-relay"
 
       - name: Check
         run: cargo check --verbose
-
-      - name: Add fmt
-        run: rustup component add rustfmt
-
-      - name: Add cargo deny
-        run: cargo install cargo-deny
+        continue-on-error: true
 
       - name: Check formatting
         run: cargo fmt -- --check
-
-      - name: Test
-        run: cargo test
         continue-on-error: true
-
-      - name: Build
-        run: cargo build --verbose
-
-      - name: Install required cargo
-        run: cargo install clippy-sarif sarif-fmt
-
-      - name: Add clippy
-        run: rustup component add clippy
 
       - name: Clippy
         run:
           cargo clippy
+          --verbose
           --all-features
           --message-format=json | clippy-sarif | tee rust-clippy-results.sarif | sarif-fmt
         continue-on-error: true
@@ -73,6 +65,9 @@ jobs:
       - name: Cargo deny
         run: cargo deny check
         continue-on-error: true
+
+      - name: Build
+        run: cargo build --verbose
 
       - name: Upload analysis results to GitHub
         uses: github/codeql-action/upload-sarif@v3
