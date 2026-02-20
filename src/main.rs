@@ -1,58 +1,33 @@
 mod blossom;
 mod db;
-mod notification;
-mod proxy;
 mod rate_limit;
 mod relay;
-mod util;
-
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-
-use axum::extract::DefaultBodyLimit;
-use deadpool_postgres::Manager;
-use deadpool_postgres::ManagerConfig;
-use deadpool_postgres::Pool;
-use deadpool_postgres::RecyclingMethod;
-use hickory_resolver::Resolver;
-use hickory_resolver::config::*;
-use hickory_resolver::name_server::TokioConnectionProvider;
 
 use anyhow::Result;
+use axum::extract::DefaultBodyLimit;
 use axum::{
     Json, Router,
     extract::{ConnectInfo, State},
     http::{StatusCode, Uri},
     response::IntoResponse,
-    routing::{any, delete, get, head, post, put},
+    routing::{any, delete, get, head, put},
     serve,
 };
 use axum_raw_websocket::RawSocketUpgrade;
 use blossom::file_store::FileStoreApi;
 use clap::Parser;
+use deadpool_postgres::Manager;
+use deadpool_postgres::ManagerConfig;
+use deadpool_postgres::Pool;
+use deadpool_postgres::RecyclingMethod;
 use nostr::types::Url;
 use nostr_relay_builder::LocalRelay;
 use relay::RelayConfig;
-use reqwest::redirect;
 use serde::Serialize;
-use tokio::sync::Mutex;
+use std::{net::SocketAddr, sync::Arc};
 use tokio_postgres::NoTls;
-use tower_http::{
-    cors::{Any, CorsLayer},
-    services::ServeDir,
-};
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
-
-use crate::{
-    notification::{
-        email::{
-            EmailService,
-            mailjet::{MailjetConfig, MailjetService},
-        },
-        notification_store::NotificationStoreApi,
-    },
-    proxy::{PROXY_REQ_TIMEOUT_SEC, ProxyClient},
-    rate_limit::RateLimiter,
-};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -68,7 +43,6 @@ async fn main() -> Result<()> {
 
     let app_state = AppState::new(&config).await?;
     let app = Router::new()
-        .nest_service("/static", ServeDir::new("./static"))
         .route("/list/{pub_key}", get(blossom::handle_list))
         .route("/mirror", put(blossom::handle_mirror))
         .route("/media", any(blossom::handle_media))
@@ -81,22 +55,6 @@ async fn main() -> Result<()> {
         .route("/{hash}", get(blossom::handle_get_file))
         .route("/{hash}", head(blossom::handle_get_file_head))
         .route("/", delete(blossom::handle_delete))
-        .route("/proxy/v1/req", post(proxy::req))
-        .route("/notifications/v1/start", post(notification::start))
-        .route("/notifications/v1/register", post(notification::register))
-        .route("/notifications/v1/send", post(notification::send))
-        .route(
-            "/notifications/confirm_email",
-            get(notification::confirm_email),
-        )
-        .route(
-            "/notifications/preferences/{token}",
-            get(notification::preferences),
-        )
-        .route(
-            "/notifications/update_preferences",
-            post(notification::update_preferences),
-        )
         .route("/relay_features", get(features_handler))
         .route("/", any(websocket_handler))
         .fallback(handle_404)
@@ -143,20 +101,10 @@ struct RelayFeature {
 async fn features_handler() -> impl IntoResponse {
     let features = RelayFeatures {
         relay_version: "0.1.0".to_string(),
-        features: vec![
-            RelayFeature {
-                name: "file_upload".to_string(),
-                version: "1".to_string(),
-            },
-            RelayFeature {
-                name: "email_notifications".to_string(),
-                version: "1".to_string(),
-            },
-            RelayFeature {
-                name: "proxy".to_string(),
-                version: "1".to_string(),
-            },
-        ],
+        features: vec![RelayFeature {
+            name: "file_upload".to_string(),
+            version: "1".to_string(),
+        }],
     };
     (StatusCode::OK, Json(features)).into_response()
 }
@@ -169,7 +117,6 @@ async fn handle_404(uri: Uri) -> impl IntoResponse {
 #[derive(Clone)]
 struct AppConfig {
     pub host_url: Url,
-    pub email_from_address: String,
     pub max_file_size_bytes: usize,
 }
 
@@ -178,10 +125,6 @@ struct AppState {
     pub relay: LocalRelay,
     pub cfg: AppConfig,
     pub file_store: Arc<dyn FileStoreApi>,
-    pub notification_store: Arc<dyn NotificationStoreApi>,
-    pub email_service: Arc<dyn EmailService>,
-    pub rate_limiter: Arc<Mutex<RateLimiter>>,
-    pub proxy_client: ProxyClient,
 }
 
 impl AppState {
@@ -191,35 +134,13 @@ impl AppState {
         db.init().await?;
         let store = Arc::new(db);
 
-        let email_service = MailjetService::new(&MailjetConfig {
-            api_key: config.email_api_key.clone(),
-            api_secret_key: config.email_api_secret_key.clone(),
-            url: config.email_url.clone(),
-        });
-
-        let proxy_client = ProxyClient {
-            dns_resolver: Resolver::builder_with_config(
-                ResolverConfig::default(),
-                TokioConnectionProvider::default(),
-            )
-            .build(),
-            cl: reqwest::Client::builder()
-                .timeout(Duration::from_secs(PROXY_REQ_TIMEOUT_SEC))
-                .redirect(redirect::Policy::none()) // manually handle redirects
-                .build()?,
-        };
         Ok(Self {
             relay: relay::init(config, pool).await?,
             cfg: AppConfig {
                 host_url: config.host_url.clone(),
-                email_from_address: config.email_from_address.clone(),
                 max_file_size_bytes: config.max_file_size_bytes,
             },
             file_store: store.clone(),
-            notification_store: store,
-            email_service: Arc::new(email_service),
-            rate_limiter: Arc::new(Mutex::new(RateLimiter::new())),
-            proxy_client,
         })
     }
 }

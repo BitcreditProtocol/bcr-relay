@@ -22,7 +22,6 @@ WORKDIR /relay
 
 # Copy binary release
 COPY --from=rust-builder /bcr-relay/target/release/bcr-relay ./bcr-relay
-COPY --from=rust-builder /bcr-relay/static/ ./static/
 
 RUN chmod +x /relay/bcr-relay
 

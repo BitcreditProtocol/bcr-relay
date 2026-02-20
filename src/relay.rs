@@ -81,14 +81,6 @@ pub struct RelayConfig {
     pub db_name: String,
     #[arg(default_value_t = String::from("localhost"), long, env = "DB_HOST")]
     pub db_host: String,
-    #[arg(default_value_t = String::from(""), long, env = "EMAIL_FROM_ADDRESS")]
-    pub email_from_address: String,
-    #[arg(default_value_t = String::from(""), long, env = "EMAIL_API_KEY")]
-    pub email_api_key: String,
-    #[arg(default_value_t = String::from(""), long, env = "EMAIL_API_SECRET_KEY")]
-    pub email_api_secret_key: String,
-    #[arg(default_value_t = Url::parse("https://api.mailjet.com").unwrap(), long, env = "EMAIL_URL")]
-    pub email_url: Url,
     #[arg(default_value_t = 12, long, env = "BLOCKCHAIN_RATE_LIMIT")]
     pub chain_rate_limit: usize,
     #[arg(
