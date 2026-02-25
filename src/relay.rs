@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, Utc};
 use clap::Parser;
 use deadpool_postgres::Pool;
 use nostr::{
-    event::{Event, TagKind, TagStandard},
+    event::{Event, Kind, TagKind, TagStandard},
     filter::{Alphabet, SingleLetterTag},
     nips::nip73::ExternalContentId,
     types::Url,
@@ -21,6 +21,7 @@ use nostr_relay_builder::{
     builder::{PolicyResult, RelayBuilderNip42, RelayBuilderNip42Mode, WritePolicy},
 };
 use tokio::sync::Mutex;
+use tracing::info;
 
 use crate::rate_limit::{PRUNE_INTERVAL, SlidingWindow};
 
@@ -126,18 +127,31 @@ impl<T: NostrRateLimiterApi> WritePolicy for BlockRateLimiter<T> {
         addr: &'a std::net::SocketAddr,
     ) -> BoxedFuture<'a, nostr_relay_builder::builder::PolicyResult> {
         Box::pin(async move {
-            if let Some(chain_key) = bcr_chain_key(event, &self.chains)
-                && !self
-                    .limiter
-                    .lock()
-                    .await
-                    .allowed(format!("{}:{chain_key}", addr).as_str(), Utc::now())
-            {
-                PolicyResult::Reject(format!(
-                    "Rate limit exceeded for BCR chain event {chain_key}"
-                ))
-            } else {
-                PolicyResult::Accept
+            match event.kind {
+                Kind::TextNote => {
+                    if let Some(chain_key) = bcr_chain_key(event, &self.chains)
+                        && !self
+                            .limiter
+                            .lock()
+                            .await
+                            .allowed(format!("{}:{chain_key}", addr).as_str(), Utc::now())
+                    {
+                        info!("Rate limit rejected BCR public chain block: {chain_key}");
+                        PolicyResult::Reject(format!(
+                            "Rate limit exceeded for BCR chain event {chain_key}"
+                        ))
+                    } else {
+                        PolicyResult::Accept
+                    }
+                }
+                Kind::GiftWrap => {
+                    info!(
+                        "Received gift wrap DM event {} from author: {}",
+                        event.id, event.pubkey
+                    );
+                    PolicyResult::Accept
+                }
+                _ => PolicyResult::Accept,
             }
         })
     }
@@ -212,6 +226,10 @@ fn bcr_chain_key(event: &Event, chains: &HashSet<String>) -> Option<String> {
                 && chain == BCR_NOSTR_CHAIN_PREFIX
                 && chains.contains(chain_id.as_ref().unwrap()) =>
             {
+                info!(
+                    "Received BCR public chain block for chain: {} id: {address}",
+                    chain_id.as_ref().unwrap(),
+                );
                 chain_id.as_ref().map(|id| format!("{id}:{address}"))
             }
             _ => None,
