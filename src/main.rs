@@ -28,10 +28,18 @@ use std::{net::SocketAddr, sync::Arc};
 use tokio_postgres::NoTls;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
+use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"))
+        .add_directive(
+            "nostr_relay_builder::local::inner=off"
+                .parse()
+                .expect("valid tracing directive"),
+        );
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
     info!("Starting relay...");
 
     let cors = CorsLayer::new()
