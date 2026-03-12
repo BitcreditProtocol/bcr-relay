@@ -1,23 +1,28 @@
 name: 'Deploy to Cloud Run'
+run-name: Deploy ${{ inputs.environment }} with tag ${{ inputs.image_tag }}
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'deploy tag to environment'
+        description: 'deploy relay to environment'
         required: true
         default: 'dev'
         type: choice
         options:
           - dev
           - prod
+      image_tag:
+        description: 'image tag'
+        required: true
+        type: string
 
 jobs:
 
 ######################################################################
 # env:  prod (bcr-relay)
   deploy:
-    name: deploy to prod
+    name: deploy to prod (${{ vars.IMAGE_NAME }}:${{ inputs.image_tag }})
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
 
     permissions:
@@ -38,39 +43,37 @@ jobs:
       IMAGE_NAME: ${{ vars.IMAGE_NAME }}
 
     steps:
-      - name: Validate tag on dispatch
-        run: |
-          if [[ "${{ github.ref_type }}" != 'tag' ]]; then
-            echo "::error::Manual deployments must be triggered from a tag."
-            echo "::error::Please select a tag from the 'Use workflow from' dropdown, not a branch."
-            exit 1
-          fi
-          echo "Validation successful: Running from tag '${{ github.ref_name }}'."
-
       - name: Authenticate to GCP
         id: auth
         uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
 
-      - name: 'Set image tag to ${{ github.ref_name }}'
-        id: tag
+      - name: Deployment summary
         run: |
-          TAG=${{ github.ref_name }}
-          SEMVER_TAG="${TAG#v}"
-          echo "IMAGE_TAG=$SEMVER_TAG" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Deployment"
+            echo ""
+            echo "- Environment: prod"
+            echo "- Service: ${{ env.GCR_SERVICE }}"
+            echo "- Region: ${{ env.GCR_REGION }}"
+            echo "- GAR path: ${{ env.GAR_PATH }}"
+            echo "- Image: ${{ env.IMAGE_NAME }}"
+            echo "- Tag: ${{ inputs.image_tag }}"
+            echo "- Full image: ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3
         with:
           service:  ${{ env.GCR_SERVICE }}
           region:   ${{ env.GCR_REGION }}
-          image:    ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.IMAGE_TAG }}
+          image:    ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}
 
 ######################################################################
 # env:  dev (bcr-relay-dev)
   deploy-dev:
-    name: deploy to dev
+    name: deploy to dev (${{ vars.IMAGE_NAME }}:${{ inputs.image_tag }})
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev'
 
     permissions:
@@ -91,31 +94,29 @@ jobs:
       IMAGE_NAME: ${{ vars.IMAGE_NAME }}
 
     steps:
-      - name: Validate tag on dispatch
-        run: |
-          if [[ "${{ github.ref_type }}" != 'tag' ]]; then
-            echo "::error::Manual deployments must be triggered from a tag."
-            echo "::error::Please select a tag from the 'Use workflow from' dropdown, not a branch."
-            exit 1
-          fi
-          echo "Validation successful: Running from tag '${{ github.ref_name }}'."
-
       - name: Authenticate to GCP
         id: auth
         uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
         with:
           credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
 
-      - name: 'Set image tag to ${{ github.ref_name }}'
-        id: tag
+      - name: Deployment summary
         run: |
-          TAG=${{ github.ref_name }}
-          SEMVER_TAG="${TAG#v}"
-          echo "IMAGE_TAG=$SEMVER_TAG" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Deployment"
+            echo ""
+            echo "- Environment: dev"
+            echo "- Service: ${{ env.GCR_SERVICE }}"
+            echo "- Region: ${{ env.GCR_REGION }}"
+            echo "- GAR path: ${{ env.GAR_PATH }}"
+            echo "- Image: ${{ env.IMAGE_NAME }}"
+            echo "- Tag: ${{ inputs.image_tag }}"
+            echo "- Full image: ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3
         with:
           service:  ${{ env.GCR_SERVICE }}
           region:   ${{ env.GCR_REGION }}
-          image:    ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.IMAGE_TAG }}
+          image:    ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}
