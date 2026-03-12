@@ -22,7 +22,7 @@ jobs:
 ######################################################################
 # env:  prod (bcr-relay)
   deploy:
-    name: deploy to prod (${{ vars.IMAGE_NAME }}:${{ inputs.image_tag }})
+    name: deploy to prod (tag ${{ inputs.image_tag }})
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
 
     permissions:
@@ -73,7 +73,7 @@ jobs:
 ######################################################################
 # env:  dev (bcr-relay-dev)
   deploy-dev:
-    name: deploy to dev (${{ vars.IMAGE_NAME }}:${{ inputs.image_tag }})
+    name: deploy to dev (tag ${{ inputs.image_tag }})
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev'
 
     permissions:
