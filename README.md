@@ -4,6 +4,14 @@ A specialized Nostr relay implementation written in Rust for the Bitcredit appli
 
 :warning: Moved to https://github.com/BitcreditProtocol/Wildcat-Auxiliary/tree/master/crates/bcr-wdc-relay
 
+###  Standalone Deployment
+
+-> https://github.com/BitcreditProtocol/bcr-relay/actions/workflows/deploy.yml
+  - Select target environment
+  - Select tag from https://github.com/BitcreditProtocol/Wildcat-Auxiliary/pkgs/container/bcr-wdc-relay/versions
+
+
+---
 ## Overview
 
 This project provides a customized Nostr relay that powers the Bitcredit application, enabling decentralized, censorship-resistant communication with features specifically designed for credit-related transactions and interactions.
