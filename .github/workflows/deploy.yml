@@ -11,6 +11,7 @@ on:
         type: choice
         options:
           - dev
+          - staging
           - prod
       image_tag:
         description: 'image tag'
@@ -20,10 +21,33 @@ on:
 jobs:
 
 ######################################################################
+# summary shown before environment approval
+  deployment-overview:
+    name: deployment overview
+
+    permissions:
+      contents: read
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create approval summary
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          # ${{ inputs.environment }}
+
+           Selected image tags:
+          - ENV: `${{ inputs.environment }}`
+          - TAG: `${{ inputs.image_tag }}`
+
+          EOF
+
+######################################################################
 # env:  prod (bcr-relay)
-  deploy:
+  deploy-prod:
     name: deploy to prod (tag ${{ inputs.image_tag }})
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    needs: deployment-overview
 
     permissions:
       contents: read
@@ -71,10 +95,63 @@ jobs:
           image:    ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}
 
 ######################################################################
+# env:  staging (bcr-relay-staging)
+  deploy-staging:
+    name: deploy to staging (tag ${{ inputs.image_tag }})
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
+    needs: deployment-overview
+
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.inputs.environment || github.event_name }}
+      cancel-in-progress: true
+
+    runs-on: ubuntu-latest
+    environment: staging
+
+    env:
+      GCR_SERVICE: ${{ vars.GCR_SERVICE }}
+      GCR_REGION: ${{ vars.GCR_REGION }}
+      GAR_PATH: ${{ vars.GAR_PATH }}
+      IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+
+    steps:
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+
+      - name: Deployment summary
+        run: |
+          {
+            echo "## Deployment"
+            echo ""
+            echo "- Environment: staging"
+            echo "- Service: ${{ env.GCR_SERVICE }}"
+            echo "- Region: ${{ env.GCR_REGION }}"
+            echo "- GAR path: ${{ env.GAR_PATH }}"
+            echo "- Image: ${{ env.IMAGE_NAME }}"
+            echo "- Tag: ${{ inputs.image_tag }}"
+            echo "- Full image: ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3
+        with:
+          service:  ${{ env.GCR_SERVICE }}
+          region:   ${{ env.GCR_REGION }}
+          image:    ${{ env.GAR_PATH }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}
+
+######################################################################
 # env:  dev (bcr-relay-dev)
   deploy-dev:
     name: deploy to dev (tag ${{ inputs.image_tag }})
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev'
+    needs: deployment-overview
 
     permissions:
       contents: read
