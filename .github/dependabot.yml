@@ -16,4 +16,4 @@ updates:
       - "dependencies"
       - "github-actions"
     assignees:
-      - "cleot" # devops maintainer
+      - "zupzup"
