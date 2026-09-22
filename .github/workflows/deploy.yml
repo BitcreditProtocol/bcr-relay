@@ -45,7 +45,7 @@ jobs:
 # env:  prod (bcr-relay)
   deploy-prod:
     name: deploy to prod (tag ${{ inputs.image_tag }})
-    timeout-minutes: 10
+    timeout-minutes: 20
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
     needs: deployment-overview
 
@@ -98,7 +98,7 @@ jobs:
 # env:  staging (bcr-relay-staging)
   deploy-staging:
     name: deploy to staging (tag ${{ inputs.image_tag }})
-    timeout-minutes: 10
+    timeout-minutes: 20
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging'
     needs: deployment-overview
 
@@ -151,7 +151,7 @@ jobs:
 # env:  dev (bcr-relay-dev)
   deploy-dev:
     name: deploy to dev (tag ${{ inputs.image_tag }})
-    timeout-minutes: 10
+    timeout-minutes: 20
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev'
     needs: deployment-overview
 
